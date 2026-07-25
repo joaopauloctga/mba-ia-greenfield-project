@@ -90,10 +90,7 @@ describe('MailService (integration)', () => {
     await mailService.sendConfirmationEmail('user@example.com', 'Alice', 'tok');
 
     const messages = await getMailpitMessages();
-    const configuredFrom =
-      process.env.MAIL_FROM ?? '"StreamTube" <noreply@streamtube.com>';
-    const expectedAddress =
-      configuredFrom.match(/<(.+)>/)?.[1] ?? configuredFrom;
+    const expectedAddress = process.env.MAIL_FROM ?? 'noreply@streamtube.com';
     expect(messages[0].From.Address).toBe(expectedAddress);
   });
 });

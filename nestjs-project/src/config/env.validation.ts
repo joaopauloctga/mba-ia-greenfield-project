@@ -19,6 +19,6 @@ export const envValidationSchema = Joi.object({
   APP_URL: Joi.string().uri().default('http://localhost:3000'),
   MAIL_HOST: Joi.string().default('mailpit'),
   MAIL_PORT: Joi.number().default(1025),
-  MAIL_FROM: Joi.string().default('"StreamTube" <noreply@streamtube.com>'),
+  MAIL_FROM: Joi.string().default('noreply@streamtube.com'),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
 });
