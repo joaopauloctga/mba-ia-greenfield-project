@@ -1,7 +1,7 @@
 ---
 kind: phase
 name: phase-03-videos
-status: dirty
+status: clean
 issue_count: 0
 sources_mtime:
   docs/phases/phase-03-videos/context.md: "2026-07-26T00:00:16-03:00"
