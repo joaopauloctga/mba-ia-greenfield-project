@@ -114,7 +114,7 @@ Deliver the video upload and processing pipeline — resumable S3 multipart uplo
 ### SI-03.5 — Upload Initiation Endpoint (POST /videos/uploads)
 
 **Route:** POST /videos/uploads
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Authenticated (creates a draft owned by the caller's channel)
 
 **Description:** Implement the endpoint that pre-registers a draft `Video` row and opens an S3 multipart upload, minting the video's public slug.
@@ -144,7 +144,7 @@ Deliver the video upload and processing pipeline — resumable S3 multipart uplo
 ### SI-03.6 — Part-URL Issuance Endpoint (GET /videos/uploads/:videoId/parts)
 
 **Route:** GET /videos/uploads/:videoId/parts
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Owner
 
 **Description:** Issue a batch of presigned `UploadPart` URLs for a range of part numbers on an open upload session.
@@ -173,7 +173,7 @@ Deliver the video upload and processing pipeline — resumable S3 multipart uplo
 ### SI-03.7 — Upload Completion Endpoint (POST /videos/uploads/:videoId/complete)
 
 **Route:** POST /videos/uploads/:videoId/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Owner
 
 **Description:** Finalize the multipart upload and enqueue the video-processing job.
@@ -203,7 +203,7 @@ Deliver the video upload and processing pipeline — resumable S3 multipart uplo
 ### SI-03.8 — Upload Abort Endpoint (DELETE /videos/uploads/:videoId)
 
 **Route:** DELETE /videos/uploads/:videoId
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Owner
 
 **Description:** Cancel an in-progress upload, releasing the multipart upload and removing the draft row.
@@ -304,7 +304,7 @@ Deliver the video upload and processing pipeline — resumable S3 multipart uplo
 ### SI-03.12 — Public Video Delivery Endpoint (GET /videos/:slug)
 
 **Route:** GET /videos/:slug
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos.plan.md`
 **Authorization:** Anonymous
 
 **Description:** Serve video metadata plus streaming and download URLs once processing has completed (`phase-03-videos/TD-09`).
