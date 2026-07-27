@@ -5,6 +5,7 @@ import { DataSource, Repository } from 'typeorm';
 import { Channel } from '../channels/entities/channel.entity';
 import storageConfig from '../config/storage.config';
 import { StorageModule } from '../storage/storage.module';
+import { StorageService } from '../storage/storage.service';
 import {
   cleanAllTables,
   createTestDataSource,
@@ -16,6 +17,20 @@ import { VideosService } from './videos.service';
 
 const ALL_ENTITIES = [User, Channel, Video];
 
+async function createVideosTestModule(): Promise<TestingModule> {
+  const ds = createTestDataSource(ALL_ENTITIES);
+
+  return Test.createTestingModule({
+    imports: [
+      ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
+      TypeOrmModule.forRoot(ds.options),
+      TypeOrmModule.forFeature([Video]),
+      StorageModule,
+    ],
+    providers: [VideosService],
+  }).compile();
+}
+
 describe('VideosService — initiateUpload (integration)', () => {
   let moduleRef: TestingModule;
   let videosService: VideosService;
@@ -25,18 +40,7 @@ describe('VideosService — initiateUpload (integration)', () => {
   let videoRepository: Repository<Video>;
 
   beforeAll(async () => {
-    const ds = createTestDataSource(ALL_ENTITIES);
-
-    moduleRef = await Test.createTestingModule({
-      imports: [
-        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
-        TypeOrmModule.forRoot(ds.options),
-        TypeOrmModule.forFeature([Video]),
-        StorageModule,
-      ],
-      providers: [VideosService],
-    }).compile();
-
+    moduleRef = await createVideosTestModule();
     videosService = moduleRef.get(VideosService);
     dataSource = moduleRef.get(DataSource);
     userRepository = dataSource.getRepository(User);
@@ -91,5 +95,91 @@ describe('VideosService — initiateUpload (integration)', () => {
     expect(persisted!.upload_id).toBe(result.uploadId);
     expect(persisted!.channel_id).toBe(channel.id);
     expect(persisted!.object_key).toBe(`videos/${result.videoId}/source.mp4`);
+  });
+});
+
+describe('VideosService — getDeliveryInfo (integration)', () => {
+  let moduleRef: TestingModule;
+  let videosService: VideosService;
+  let storageService: StorageService;
+  let dataSource: DataSource;
+  let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    moduleRef = await createVideosTestModule();
+    videosService = moduleRef.get(VideosService);
+    storageService = moduleRef.get(StorageService);
+    dataSource = moduleRef.get(DataSource);
+    userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await moduleRef.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let counter = 0;
+  async function createChannel(): Promise<Channel> {
+    counter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `videos_delivery_${counter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    return channelRepository.save(
+      channelRepository.create({
+        name: `Channel ${counter}`,
+        nickname: `chan_delivery_${counter}`,
+        user_id: user.id,
+      }),
+    );
+  }
+
+  function slug(): string {
+    counter += 1;
+    return `dsl${counter}`.padEnd(11, '0').slice(0, 11);
+  }
+
+  it('returns working presigned stream and download URLs for a ready video', async () => {
+    const channel = await createChannel();
+    const objectKey = `videos/delivery-test-${Date.now()}/source.mp4`;
+    const body = Buffer.from('integration-test-video-bytes');
+    await storageService.putObject(objectKey, body);
+
+    const video = await videoRepository.save(
+      videoRepository.create({
+        channel_id: channel.id,
+        slug: slug(),
+        original_filename: 'clip.mp4',
+        object_key: objectKey,
+        processing_status: VideoProcessingStatus.READY,
+        duration_seconds: 42,
+      }),
+    );
+
+    const result = await videosService.getDeliveryInfo(video.slug);
+
+    expect(result.id).toBe(video.id);
+    expect(result.durationSeconds).toBe(42);
+    expect(result.expiresAt).toBeTruthy();
+
+    const streamResponse = await fetch(result.streamUrl);
+    expect(streamResponse.ok).toBe(true);
+    const streamBody = Buffer.from(await streamResponse.arrayBuffer());
+    expect(streamBody.equals(body)).toBe(true);
+
+    const downloadResponse = await fetch(result.downloadUrl);
+    expect(downloadResponse.ok).toBe(true);
+    expect(downloadResponse.headers.get('content-disposition')).toContain(
+      'attachment',
+    );
   });
 });

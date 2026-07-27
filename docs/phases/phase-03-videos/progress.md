@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/13 completed
+**SIs:** 8/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -68,9 +68,15 @@
   - Verified manually (not by an automated test, since this AC is Docker-level, not a Jest concern): rebuilt `dist/`, built the `video-worker` image, ran `docker compose up -d video-worker` — container stays up (not crash-looping), `docker compose exec video-worker ffmpeg -version` and `ffprobe -version` both succeed, and the boot log shows only `WorkerModule`/`TypeOrmModule`/`QueueModule`/`FfmpegModule`/`StorageModule`/`BullModule` initializing — no `RoutesResolver` or controller mapping, confirming no HTTP surface ships in this image.
 
 ### SI-03.12 — Public Video Delivery Endpoint (GET /videos/:slug)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 6 passing (`src/videos/videos.service.spec.ts`, adding to existing file), 2 passing (`src/videos/videos.service.integration-spec.ts`, adding to existing file), 5 passing (`test/videos.e2e-spec.ts`, adding to existing file) — 13 total across the three files, all runs green on the first attempt
+- **Observations:**
+  - Added `VideoNotFoundException` (404) and `VideoNotReadyException` (409) to `common/exceptions/domain.exception.ts` — necessary collateral matching the Error Catalog's `VIDEO_NOT_FOUND`/`VIDEO_NOT_READY` codes; no existing exception covered these.
+  - `VideoDeliveryInfo.durationSeconds` is typed `number` (non-nullable) even though the entity column `duration_seconds` is nullable; the service asserts it (`video.duration_seconds as number`) because a `ready` video is guaranteed to have it populated by the worker (SI-03.11, not yet built) before the status flips to `'ready'` — matches the Tech Spec's API Contract, which also types it as a plain `number`.
+  - Introduced a local `DELIVERY_URL_EXPIRES_SECONDS = 3600` constant in `videos.service.ts` rather than a new env-configurable TTL — the phase's decisions doc anticipated three distinct presign TTLs (upload-part/playback/worker-read) but none were ever added as env keys in SI-03.1; both the stream and download presigns share this same constant, and `expiresAt` is computed once from it so the two URLs provably share the same expiry instant.
+  - Response fields (`id`, `slug`, `durationSeconds`, `streamUrl`, `downloadUrl`, `expiresAt`) use camelCase, same rationale as SI-03.5: the SI's Technical action prose and the `videos.plan.md` E2E spec (scenario `get-delivery-ready-success`) both use camelCase, even though the Tech Specs' API Contracts table rendered them snake_case.
+  - Refactored `videos.service.integration-spec.ts` to extract a shared `createVideosTestModule()` helper (mirrors `auth.service.integration-spec.ts`'s `createAuthTestModule()` pattern) so the new `getDeliveryInfo` describe block doesn't duplicate the full NestJS test-module bootstrap inline.
+  - Extended `test/videos.e2e-spec.ts` with the Group 5 (Public Delivery) scenarios from `videos.plan.md`. Seeds `User`+`Channel`+`Video` directly via TypeORM repositories rather than through the register/login HTTP flow, since the endpoint is anonymous and no caller identity/ownership is relevant to this delivery check — only a valid `channel_id` FK is needed on the seeded `Video` row.
 
 ### SI-03.6 — Part-URL Issuance Endpoint (GET /videos/uploads/:videoId/parts)
 - **Status:** pending

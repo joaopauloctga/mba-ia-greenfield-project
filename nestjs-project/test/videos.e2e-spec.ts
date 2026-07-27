@@ -5,10 +5,15 @@ import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
+import { Channel } from '../src/channels/entities/channel.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { cleanAllTables } from '../src/test/create-test-data-source';
-import { Video, VideoProcessingStatus } from '../src/videos/entities/video.entity';
+import { User } from '../src/users/entities/user.entity';
+import {
+  Video,
+  VideoProcessingStatus,
+} from '../src/videos/entities/video.entity';
 
 describe('Videos (e2e)', () => {
   let app: INestApplication<App>;
@@ -112,5 +117,74 @@ describe('Videos (e2e)', () => {
       .send({ filename: 'clip.mp4' });
 
     expect(res.status).toBe(400);
+  });
+
+  // Group 5: Public Delivery (SI-03.12)
+
+  let deliverySeedCounter = 0;
+  async function seedVideoWithStatus(
+    status: VideoProcessingStatus,
+  ): Promise<Video> {
+    deliverySeedCounter += 1;
+    const userRepository = dataSource.getRepository(User);
+    const channelRepository = dataSource.getRepository(Channel);
+    const videoRepository = dataSource.getRepository(Video);
+
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `delivery_${deliverySeedCounter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    const channel = await channelRepository.save(
+      channelRepository.create({
+        name: `Delivery Channel ${deliverySeedCounter}`,
+        nickname: `delivery_chan_${deliverySeedCounter}`,
+        user_id: user.id,
+      }),
+    );
+    return videoRepository.save(
+      videoRepository.create({
+        channel_id: channel.id,
+        slug: `dlv${deliverySeedCounter}`.padEnd(11, '0').slice(0, 11),
+        original_filename: 'clip.mp4',
+        object_key: `videos/e2e-delivery-${deliverySeedCounter}/source.mp4`,
+        processing_status: status,
+        duration_seconds: 42,
+      }),
+    );
+  }
+
+  it('get-delivery-ready-success', async () => {
+    const video = await seedVideoWithStatus(VideoProcessingStatus.READY);
+
+    const res = await request(app.getHttpServer()).get(
+      `/videos/${video.slug}`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.streamUrl).toBeDefined();
+    expect(res.body.downloadUrl).toBeDefined();
+    expect(res.body.expiresAt).toBeDefined();
+  });
+
+  it('get-delivery-not-found', async () => {
+    const res = await request(app.getHttpServer()).get(
+      '/videos/does-not-exist',
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('VIDEO_NOT_FOUND');
+  });
+
+  it('get-delivery-not-ready', async () => {
+    const video = await seedVideoWithStatus(VideoProcessingStatus.PROCESSING);
+
+    const res = await request(app.getHttpServer()).get(
+      `/videos/${video.slug}`,
+    );
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('VIDEO_NOT_READY');
   });
 });

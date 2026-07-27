@@ -3,6 +3,10 @@ import { extname } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
+import {
+  VideoNotFoundException,
+  VideoNotReadyException,
+} from '../common/exceptions/domain.exception';
 import { StorageService } from '../storage/storage.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { Video, VideoProcessingStatus } from './entities/video.entity';
@@ -11,12 +15,22 @@ const PG_UNIQUE_VIOLATION = '23505';
 const SLUG_COLUMN = 'slug';
 const MAX_SLUG_ATTEMPTS = 3;
 const PART_SIZE_BYTES = 64 * 1024 * 1024;
+const DELIVERY_URL_EXPIRES_SECONDS = 3600;
 
 export interface InitiateUploadResult {
   videoId: string;
   slug: string;
   uploadId: string;
   partSize: number;
+}
+
+export interface VideoDeliveryInfo {
+  id: string;
+  slug: string;
+  durationSeconds: number;
+  streamUrl: string;
+  downloadUrl: string;
+  expiresAt: string;
 }
 
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
@@ -68,6 +82,35 @@ export class VideosService {
       slug: video.slug,
       uploadId,
       partSize: PART_SIZE_BYTES,
+    };
+  }
+
+  async getDeliveryInfo(slug: string): Promise<VideoDeliveryInfo> {
+    const video = await this.videoRepository.findOneBy({ slug });
+    if (!video) {
+      throw new VideoNotFoundException();
+    }
+    if (video.processing_status !== VideoProcessingStatus.READY) {
+      throw new VideoNotReadyException();
+    }
+
+    const expiresIn = DELIVERY_URL_EXPIRES_SECONDS;
+    const [streamUrl, downloadUrl] = await Promise.all([
+      this.storageService.presignGetUrl(video.object_key, { expiresIn }),
+      this.storageService.presignGetUrl(video.object_key, {
+        expiresIn,
+        responseContentDisposition: `attachment; filename="${video.original_filename}"`,
+      }),
+    ]);
+    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+    return {
+      id: video.id,
+      slug: video.slug,
+      durationSeconds: video.duration_seconds as number,
+      streamUrl,
+      downloadUrl,
+      expiresAt,
     };
   }
 

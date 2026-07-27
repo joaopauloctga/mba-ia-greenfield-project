@@ -1,9 +1,13 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
+import {
+  VideoNotFoundException,
+  VideoNotReadyException,
+} from '../common/exceptions/domain.exception';
 import { StorageService } from '../storage/storage.service';
 import { CreateUploadDto } from './dto/create-upload.dto';
-import { Video } from './entities/video.entity';
+import { Video, VideoProcessingStatus } from './entities/video.entity';
 import { VideosService } from './videos.service';
 
 function slugUniqueViolation(): QueryFailedError {
@@ -92,5 +96,50 @@ describe('VideosService — initiateUpload', () => {
     ).rejects.toThrow(dbError);
     expect(videoRepository.create).toHaveBeenCalledTimes(1);
     expect(videoRepository.save).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('VideosService — getDeliveryInfo', () => {
+  let videosService: VideosService;
+  let videoRepository: { findOneBy: jest.Mock };
+  let storageService: jest.Mocked<StorageService>;
+
+  beforeEach(async () => {
+    videoRepository = {
+      findOneBy: jest.fn(),
+    };
+    storageService = {
+      presignGetUrl: jest.fn(),
+    } as unknown as jest.Mocked<StorageService>;
+
+    const module = await Test.createTestingModule({
+      providers: [
+        VideosService,
+        { provide: getRepositoryToken(Video), useValue: videoRepository },
+        { provide: StorageService, useValue: storageService },
+      ],
+    }).compile();
+
+    videosService = module.get(VideosService);
+  });
+
+  it('throws VideoNotFoundException when no video matches the slug', async () => {
+    videoRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      videosService.getDeliveryInfo('missing-slug'),
+    ).rejects.toThrow(VideoNotFoundException);
+    expect(storageService.presignGetUrl).not.toHaveBeenCalled();
+  });
+
+  it('throws VideoNotReadyException when the video has not finished processing', async () => {
+    videoRepository.findOneBy.mockResolvedValue({
+      processing_status: VideoProcessingStatus.PROCESSING,
+    });
+
+    await expect(videosService.getDeliveryInfo('some-slug')).rejects.toThrow(
+      VideoNotReadyException,
+    );
+    expect(storageService.presignGetUrl).not.toHaveBeenCalled();
   });
 });
