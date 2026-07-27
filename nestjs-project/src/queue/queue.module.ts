@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import type { ConfigType } from '@nestjs/config';
 import queueConfig from '../config/queue.config';
 import { VIDEO_PROCESSING_QUEUE } from './queue.constants';
+import { ReconcileSchedulerService } from './reconcile-scheduler.service';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { VIDEO_PROCESSING_QUEUE } from './queue.constants';
     }),
     BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),
   ],
+  providers: [ReconcileSchedulerService],
   exports: [BullModule],
 })
 export class QueueModule {}
