@@ -1,6 +1,6 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
+**Status:** completed
 **SIs:** 13/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
@@ -121,6 +121,15 @@
   - `abortUpload` deletes the draft row via `videoRepository.remove(video)` (not `.delete({id})`) since the entity instance is already loaded from the ownership/state check — avoids a redundant second query.
   - The integration test also asserts `StorageService.listParts` rejects on the aborted `uploadId` afterward (real MinIO behavior), matching the E2E spec's `abort-upload-success` scenario wording ("the multipart upload no longer exists in storage").
   - `npx tsc --noEmit` clean. Lint: no new error categories in `videos.service.ts`/`videos.controller.ts` beyond the same 6 pre-existing errors in the untouched `isPgUniqueViolationOnColumn` helper (flagged since before this SI); test-file errors are the same documented `no-unsafe-member-access`/`unbound-method`/`require-await` noise from SI-03.6/03.7/03.11 — left untouched per scope limits.
+
+### Post-phase fix — `content_type` forwarded to storage (SI-03.3 / SI-03.5)
+- **Status:** completed
+- **Tests:** 2 added (1 integration in `src/storage/storage.service.integration-spec.ts`, 1 integration in `src/videos/videos.service.integration-spec.ts`); full suite 201 unit+integration / 68 e2e green
+- **Observations:**
+  - `CreateUploadDto.content_type` was required and validated per SI-03.5's Technical actions, but no SI ever forwarded it to storage, so completed objects were stored as `binary/octet-stream`. Verified against a live upload: `GET /videos/:slug`'s `streamUrl` served `content-type: binary/octet-stream`, which a browser will not play inline in a `<video>` element — a functional gap against the phase capability "Reprodução via streaming". The field was effectively dead: `create-upload.dto.ts:10` was its only reference in `src/`.
+  - Fix: `StorageService.createMultipartUpload(key, contentType?)` now passes `ContentType` to `CreateMultipartUploadCommand`, and `VideosService.initiateUpload` supplies `dto.content_type`. Confirmed via context7 (`aws-sdk-js-v3`) and the installed `@aws-sdk/client-s3@3.1095.0` type declarations that `CreateMultipartUploadRequest.ContentType?: string` is the correct parameter ("a standard MIME type describing the format of the object data") and that S3/MinIO persists it from the create call through to the completed object.
+  - Optional parameter rather than required — no plan-level contract change: `StorageService` is also used for the thumbnail `putObject` path and the plan's Data Model stores no content type, so the MIME type stays a per-call storage concern, not new persisted state.
+  - Verified end to end after the fix: the same upload now serves `content-type: video/mp4` on both `streamUrl` (206 + `content-range`, Range semantics unchanged) and `downloadUrl` (still `attachment; filename="…"`).
 
 ### SI-03.13 — Reconciliation Sweep for Stuck Processing Jobs
 - **Status:** completed

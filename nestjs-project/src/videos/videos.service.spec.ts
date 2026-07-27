@@ -76,6 +76,7 @@ describe('VideosService — initiateUpload', () => {
     expect(videoRepository.save).toHaveBeenCalledTimes(2);
     expect(storageService.createMultipartUpload).toHaveBeenCalledWith(
       `videos/${result.videoId}/source.mp4`,
+      'video/mp4',
     );
   });
 

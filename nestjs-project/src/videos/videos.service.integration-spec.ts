@@ -107,6 +107,34 @@ describe('VideosService — initiateUpload (integration)', () => {
     expect(persisted!.channel_id).toBe(channel.id);
     expect(persisted!.object_key).toBe(`videos/${result.videoId}/source.mp4`);
   });
+
+  it("opens the multipart upload with the request's content type so playback is served as video", async () => {
+    const channel = await createChannel();
+
+    const result = await videosService.initiateUpload(channel.id, dto);
+
+    const storageService = moduleRef.get(StorageService);
+    const partUrl = await storageService.presignUploadPart(
+      `videos/${result.videoId}/source.mp4`,
+      result.uploadId,
+      1,
+    );
+    const putResponse = await fetch(partUrl, {
+      method: 'PUT',
+      body: Buffer.from('content-type-wiring-check'),
+    });
+    await storageService.completeMultipartUpload(
+      `videos/${result.videoId}/source.mp4`,
+      result.uploadId,
+      [{ partNumber: 1, eTag: putResponse.headers.get('etag') as string }],
+    );
+
+    const getResponse = await fetch(
+      await storageService.presignGetUrl(`videos/${result.videoId}/source.mp4`),
+    );
+
+    expect(getResponse.headers.get('content-type')).toBe('video/mp4');
+  });
 });
 
 describe('VideosService — getDeliveryInfo (integration)', () => {

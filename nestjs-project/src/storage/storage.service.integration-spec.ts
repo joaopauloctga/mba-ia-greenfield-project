@@ -30,7 +30,7 @@ describe('StorageService (integration)', () => {
 
   it('completes a multipart upload against real MinIO and the resulting object is retrievable', async () => {
     const key = `videos/test-${Date.now()}/source.mp4`;
-    const { uploadId } = await service.createMultipartUpload(key);
+    const { uploadId } = await service.createMultipartUpload(key, 'video/mp4');
 
     const partUrl = await service.presignUploadPart(key, uploadId, 1);
     const body = Buffer.from('integration-test-part-content');
@@ -48,6 +48,24 @@ describe('StorageService (integration)', () => {
     expect(getResponse.ok).toBe(true);
     const retrieved = Buffer.from(await getResponse.arrayBuffer());
     expect(retrieved.equals(body)).toBe(true);
+  });
+
+  it('persists the content type passed at creation so the completed object is served with it', async () => {
+    const key = `videos/test-${Date.now()}/source.mp4`;
+    const { uploadId } = await service.createMultipartUpload(key, 'video/mp4');
+
+    const partUrl = await service.presignUploadPart(key, uploadId, 1);
+    const putResponse = await fetch(partUrl, {
+      method: 'PUT',
+      body: Buffer.from('integration-test-part-content'),
+    });
+    await service.completeMultipartUpload(key, uploadId, [
+      { partNumber: 1, eTag: putResponse.headers.get('etag') as string },
+    ]);
+
+    const getResponse = await fetch(await service.presignGetUrl(key));
+
+    expect(getResponse.headers.get('content-type')).toBe('video/mp4');
   });
 
   it('aborts a multipart upload without throwing', async () => {

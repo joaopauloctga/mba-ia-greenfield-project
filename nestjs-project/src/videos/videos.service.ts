@@ -109,8 +109,10 @@ export class VideosService {
       dto,
     );
 
-    const { uploadId } =
-      await this.storageService.createMultipartUpload(objectKey);
+    const { uploadId } = await this.storageService.createMultipartUpload(
+      objectKey,
+      dto.content_type,
+    );
 
     video.upload_id = uploadId;
     await this.videoRepository.save(video);
