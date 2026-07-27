@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 11/13 completed
+**SIs:** 12/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -114,9 +114,13 @@
   - `npx tsc --noEmit` is clean. `npm run lint` scoped to every file this SI touched shows no new error categories: production files are lint-clean except one pre-existing, untouched function (`isPgUniqueViolationOnColumn`, predates this SI); test-file errors are the same `@typescript-eslint/no-unsafe-member-access`/`no-unsafe-return`/`unbound-method`/`require-await` categories already documented as pre-existing noise by SI-03.6/SI-03.11 (supertest's untyped `res.body`, `expect(mock.method)` Jest patterns) — left untouched per scope limits.
 
 ### SI-03.8 — Upload Abort Endpoint (DELETE /videos/uploads/:videoId)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 4 passing (`src/videos/videos.service.spec.ts`, adding to existing file), 1 passing (`src/videos/videos.service.integration-spec.ts`, adding to existing file), 3 passing (`test/videos.e2e-spec.ts`, adding to existing file) — 8 total, all green; full re-run of `videos.e2e-spec.ts` (16/16) and the unit+integration pair (31/31) also green
+- **Observations:**
+  - Same three-exception ownership/state check shape as SI-03.7's `completeUpload` (`UploadSessionNotFoundException` / `ForbiddenNotOwnerException` / `UploadAlreadyCompletedException`), per this SI's own Technical action wording ("same exceptions as SI-03.7") — no new exception classes needed.
+  - `abortUpload` deletes the draft row via `videoRepository.remove(video)` (not `.delete({id})`) since the entity instance is already loaded from the ownership/state check — avoids a redundant second query.
+  - The integration test also asserts `StorageService.listParts` rejects on the aborted `uploadId` afterward (real MinIO behavior), matching the E2E spec's `abort-upload-success` scenario wording ("the multipart upload no longer exists in storage").
+  - `npx tsc --noEmit` clean. Lint: no new error categories in `videos.service.ts`/`videos.controller.ts` beyond the same 6 pre-existing errors in the untouched `isPgUniqueViolationOnColumn` helper (flagged since before this SI); test-file errors are the same documented `no-unsafe-member-access`/`unbound-method`/`require-await` noise from SI-03.6/03.7/03.11 — left untouched per scope limits.
 
 ### SI-03.13 — Reconciliation Sweep for Stuck Processing Jobs
 - **Status:** pending
