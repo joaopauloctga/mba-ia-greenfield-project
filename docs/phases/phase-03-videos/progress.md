@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/13 completed
+**SIs:** 3/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -23,9 +23,12 @@
   - Full-suite run (`npm test -- --runInBand`) surfaced one unrelated pre-existing failure: `src/database/migrations.integration-spec.ts › should apply all migrations and create all four tables` fails with `type "verification_tokens_type_enum" already exists`. Root cause: that spec's `beforeAll` drops the 4 managed tables + `migrations` tracking table but never drops the Postgres enum type `CreateAuthTokens`'s `up()` creates, so once the type exists in the shared dev DB (it has since a migration run in April, well before this session) any full run of that file fails on the first `CREATE TYPE`. Unrelated to `Video`/`Channel` — not touched, per scope limits; flagging for a separate fix.
 
 ### SI-03.9 — FfmpegService (Metadata Extraction and Thumbnail Frame Extraction)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 5 passing (`src/ffmpeg/ffmpeg.service.spec.ts`)
+- **Observations:**
+  - No npm library added — TD-06 chose direct `child_process.spawn` over `fluent-ffmpeg`, so `getMetadata`/`extractThumbnail` share a private `run()` helper collecting stdout/stderr as `Buffer`s and rejecting with a custom `FfmpegProcessError` (exit code + stderr) on non-zero exit, per the SI's acceptance criteria.
+  - Did not register `FfmpegModule` in `app.module.ts` — unlike `VideosModule` in SI-03.2, there's no TypeORM entity-metadata requirement forcing early registration; the only consumer (`WorkerModule`) is SI-03.10, not yet implemented. Matches the SI's Technical actions, which don't list an `app.module.ts` change.
+  - No `FfmpegModule` compilation test — per `testing-guide-nestjs-project`'s `artifacts/modules.md`, a module with only local providers and no configured imports (TypeORM, JWT, Bull, etc.) skips the module test; matches the SI's Tests table, which lists only `FfmpegService`.
 
 ### SI-03.3 — StorageModule (S3 Client Provider, Key Builder, and Presign Helpers)
 - **Status:** pending
