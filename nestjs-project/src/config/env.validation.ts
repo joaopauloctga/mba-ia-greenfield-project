@@ -29,4 +29,6 @@ export const envValidationSchema = Joi.object({
   S3_FORCE_PATH_STYLE: Joi.string().valid('true', 'false').default('true'),
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().port().default(6379),
+  AUTH_THROTTLE_TTL_MS: Joi.number().default(60000),
+  AUTH_THROTTLE_LIMIT: Joi.number().default(10),
 });

@@ -1,14 +1,20 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { QueryFailedError } from 'typeorm';
 import {
   ForbiddenNotOwnerException,
   InvalidPartRangeException,
+  PartListMismatchException,
+  UploadAlreadyCompletedException,
   UploadSessionNotFoundException,
   VideoNotFoundException,
   VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
+import { VIDEO_PROCESSING_QUEUE } from '../queue/queue.constants';
 import { StorageService } from '../storage/storage.service';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { Video, VideoProcessingStatus } from './entities/video.entity';
 import { VideosService } from './videos.service';
@@ -49,6 +55,10 @@ describe('VideosService — initiateUpload', () => {
         VideosService,
         { provide: getRepositoryToken(Video), useValue: videoRepository },
         { provide: StorageService, useValue: storageService },
+        {
+          provide: getQueueToken(VIDEO_PROCESSING_QUEUE),
+          useValue: { add: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -120,6 +130,10 @@ describe('VideosService — getDeliveryInfo', () => {
         VideosService,
         { provide: getRepositoryToken(Video), useValue: videoRepository },
         { provide: StorageService, useValue: storageService },
+        {
+          provide: getQueueToken(VIDEO_PROCESSING_QUEUE),
+          useValue: { add: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -178,6 +192,10 @@ describe('VideosService — getPartUrls', () => {
         VideosService,
         { provide: getRepositoryToken(Video), useValue: videoRepository },
         { provide: StorageService, useValue: storageService },
+        {
+          provide: getQueueToken(VIDEO_PROCESSING_QUEUE),
+          useValue: { add: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -249,5 +267,138 @@ describe('VideosService — getPartUrls', () => {
       videosService.getPartUrls('video-1', 'channel-1', from, to),
     ).rejects.toThrow(InvalidPartRangeException);
     expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+});
+
+describe('VideosService — completeUpload', () => {
+  let videosService: VideosService;
+  let videoRepository: { findOneBy: jest.Mock; save: jest.Mock };
+  let storageService: jest.Mocked<StorageService>;
+  let queue: jest.Mocked<Queue>;
+
+  const openVideo = {
+    id: 'video-1',
+    channel_id: 'channel-1',
+    object_key: 'videos/video-1/source.mp4',
+    upload_id: 'upload-1',
+    processing_status: VideoProcessingStatus.AWAITING_UPLOAD,
+  };
+
+  const dto: CompleteUploadDto = {
+    parts: [{ part_number: 1, e_tag: 'etag-1' }],
+  };
+
+  beforeEach(async () => {
+    videoRepository = {
+      findOneBy: jest.fn(),
+      save: jest.fn(async (input) => input),
+    };
+    storageService = {
+      listParts: jest
+        .fn()
+        .mockResolvedValue([{ partNumber: 1, eTag: 'etag-1' }]),
+      completeMultipartUpload: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<StorageService>;
+    queue = { add: jest.fn() } as unknown as jest.Mocked<Queue>;
+
+    const module = await Test.createTestingModule({
+      providers: [
+        VideosService,
+        { provide: getRepositoryToken(Video), useValue: videoRepository },
+        { provide: StorageService, useValue: storageService },
+        { provide: getQueueToken(VIDEO_PROCESSING_QUEUE), useValue: queue },
+      ],
+    }).compile();
+
+    videosService = module.get(VideosService);
+  });
+
+  it('completes the upload, transitions to processing, and enqueues exactly one job', async () => {
+    videoRepository.findOneBy.mockResolvedValue({ ...openVideo });
+
+    const result = await videosService.completeUpload(
+      'video-1',
+      'channel-1',
+      dto,
+    );
+
+    expect(result).toEqual({
+      videoId: 'video-1',
+      processingStatus: VideoProcessingStatus.PROCESSING,
+    });
+    expect(storageService.completeMultipartUpload).toHaveBeenCalledWith(
+      openVideo.object_key,
+      openVideo.upload_id,
+      [{ partNumber: 1, eTag: 'etag-1' }],
+    );
+    expect(videoRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processing_status: VideoProcessingStatus.PROCESSING,
+        upload_id: null,
+      }),
+    );
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add).toHaveBeenCalledWith(
+      'video.process',
+      { videoId: 'video-1' },
+      expect.objectContaining({ jobId: 'video-1', attempts: 3 }),
+    );
+  });
+
+  it('throws UploadSessionNotFoundException when no video matches videoId', async () => {
+    videoRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      videosService.completeUpload('missing', 'channel-1', dto),
+    ).rejects.toThrow(UploadSessionNotFoundException);
+    expect(storageService.listParts).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenNotOwnerException when the caller channel does not own the video', async () => {
+    videoRepository.findOneBy.mockResolvedValue({ ...openVideo });
+
+    await expect(
+      videosService.completeUpload('video-1', 'other-channel', dto),
+    ).rejects.toThrow(ForbiddenNotOwnerException);
+    expect(storageService.listParts).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('throws UploadAlreadyCompletedException when the session left awaiting_upload', async () => {
+    videoRepository.findOneBy.mockResolvedValue({
+      ...openVideo,
+      processing_status: VideoProcessingStatus.PROCESSING,
+    });
+
+    await expect(
+      videosService.completeUpload('video-1', 'channel-1', dto),
+    ).rejects.toThrow(UploadAlreadyCompletedException);
+    expect(storageService.listParts).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('throws PartListMismatchException when storage reports a different part count', async () => {
+    videoRepository.findOneBy.mockResolvedValue({ ...openVideo });
+    storageService.listParts.mockResolvedValue([]);
+
+    await expect(
+      videosService.completeUpload('video-1', 'channel-1', dto),
+    ).rejects.toThrow(PartListMismatchException);
+    expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('throws PartListMismatchException when an ETag does not match storage', async () => {
+    videoRepository.findOneBy.mockResolvedValue({ ...openVideo });
+    storageService.listParts.mockResolvedValue([
+      { partNumber: 1, eTag: 'different-etag' },
+    ]);
+
+    await expect(
+      videosService.completeUpload('video-1', 'channel-1', dto),
+    ).rejects.toThrow(PartListMismatchException);
+    expect(storageService.completeMultipartUpload).not.toHaveBeenCalled();
+    expect(queue.add).not.toHaveBeenCalled();
   });
 });

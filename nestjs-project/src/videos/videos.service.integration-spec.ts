@@ -1,9 +1,15 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
 import { Channel } from '../channels/entities/channel.entity';
 import storageConfig from '../config/storage.config';
+import queueConfig from '../config/queue.config';
+import { PartListMismatchException } from '../common/exceptions/domain.exception';
+import { QueueModule } from '../queue/queue.module';
+import { VIDEO_PROCESSING_QUEUE } from '../queue/queue.constants';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
 import {
@@ -11,6 +17,7 @@ import {
   createTestDataSource,
 } from '../test/create-test-data-source';
 import { User } from '../users/entities/user.entity';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { Video, VideoProcessingStatus } from './entities/video.entity';
 import { VideosService } from './videos.service';
@@ -22,10 +29,14 @@ async function createVideosTestModule(): Promise<TestingModule> {
 
   return Test.createTestingModule({
     imports: [
-      ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
+      ConfigModule.forRoot({
+        isGlobal: true,
+        load: [storageConfig, queueConfig],
+      }),
       TypeOrmModule.forRoot(ds.options),
       TypeOrmModule.forFeature([Video]),
       StorageModule,
+      QueueModule,
     ],
     providers: [VideosService],
   }).compile();
@@ -248,5 +259,96 @@ describe('VideosService — getPartUrls (integration)', () => {
 
     const persisted = await videoRepository.findOneBy({ id: videoId });
     expect(persisted!.upload_id).toBeTruthy();
+  });
+});
+
+describe('VideosService — completeUpload (integration)', () => {
+  let moduleRef: TestingModule;
+  let videosService: VideosService;
+  let queue: Queue;
+  let dataSource: DataSource;
+  let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    moduleRef = await createVideosTestModule();
+    videosService = moduleRef.get(VideosService);
+    queue = moduleRef.get<Queue>(getQueueToken(VIDEO_PROCESSING_QUEUE));
+    dataSource = moduleRef.get(DataSource);
+    userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await moduleRef.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let counter = 0;
+  async function createChannel(): Promise<Channel> {
+    counter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `videos_complete_${counter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    return channelRepository.save(
+      channelRepository.create({
+        name: `Channel ${counter}`,
+        nickname: `chan_complete_${counter}`,
+        user_id: user.id,
+      }),
+    );
+  }
+
+  async function initiateAndUploadOnePart(
+    channelId: string,
+  ): Promise<{ videoId: string; dto: CompleteUploadDto }> {
+    const { videoId } = await videosService.initiateUpload(channelId, {
+      filename: 'clip.mp4',
+      content_type: 'video/mp4',
+    });
+    const { parts } = await videosService.getPartUrls(videoId, channelId, 1, 1);
+    const putResponse = await fetch(parts[0].url, {
+      method: 'PUT',
+      body: Buffer.from('integration-test-part-content'),
+    });
+    const eTag = putResponse.headers.get('etag') as string;
+
+    return { videoId, dto: { parts: [{ part_number: 1, e_tag: eTag }] } };
+  }
+
+  it('completes a real CompleteMultipartUpload, transitions status, and enqueues a visible job', async () => {
+    const channel = await createChannel();
+    const { videoId, dto } = await initiateAndUploadOnePart(channel.id);
+
+    const result = await videosService.completeUpload(videoId, channel.id, dto);
+
+    expect(result.processingStatus).toBe(VideoProcessingStatus.PROCESSING);
+
+    const persisted = await videoRepository.findOneBy({ id: videoId });
+    expect(persisted!.processing_status).toBe(VideoProcessingStatus.PROCESSING);
+    expect(persisted!.upload_id).toBeNull();
+
+    const job = await queue.getJob(videoId);
+    expect(job).toBeDefined();
+    expect(job!.data).toEqual({ videoId });
+  });
+
+  it('rejects a part list whose ETag does not match storage', async () => {
+    const channel = await createChannel();
+    const { videoId } = await initiateAndUploadOnePart(channel.id);
+
+    await expect(
+      videosService.completeUpload(videoId, channel.id, {
+        parts: [{ part_number: 1, e_tag: '"not-the-real-etag"' }],
+      }),
+    ).rejects.toThrow(PartListMismatchException);
   });
 });

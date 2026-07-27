@@ -78,3 +78,19 @@ export class InvalidPartRangeException extends DomainException {
     super('INVALID_PART_RANGE', 400, 'Invalid part range');
   }
 }
+
+export class UploadAlreadyCompletedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_ALREADY_COMPLETED',
+      409,
+      'Upload session is no longer accepting parts',
+    );
+  }
+}
+
+export class PartListMismatchException extends DomainException {
+  constructor() {
+    super('PART_LIST_MISMATCH', 400, 'Submitted parts do not match storage');
+  }
+}

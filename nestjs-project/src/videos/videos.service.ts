@@ -1,16 +1,25 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { QueryFailedError, Repository } from 'typeorm';
 import {
   ForbiddenNotOwnerException,
   InvalidPartRangeException,
+  PartListMismatchException,
+  UploadAlreadyCompletedException,
   UploadSessionNotFoundException,
   VideoNotFoundException,
   VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
-import { StorageService } from '../storage/storage.service';
+import {
+  VIDEO_PROCESSING_QUEUE,
+  VIDEO_PROCESS_JOB_NAME,
+} from '../queue/queue.constants';
+import { CompletedPart, StorageService } from '../storage/storage.service';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import { Video, VideoProcessingStatus } from './entities/video.entity';
 
@@ -22,6 +31,8 @@ const DELIVERY_URL_EXPIRES_SECONDS = 3600;
 const UPLOAD_PART_URL_EXPIRES_SECONDS = 3600;
 const MIN_PART_NUMBER = 1;
 const MAX_PART_NUMBER = 10000;
+const JOB_ATTEMPTS = 3;
+const JOB_BACKOFF_DELAY_MS = 1000;
 
 export interface InitiateUploadResult {
   videoId: string;
@@ -49,6 +60,11 @@ export interface PartUrlsResult {
   parts: PartUrlEntry[];
 }
 
+export interface CompleteUploadResult {
+  videoId: string;
+  processingStatus: VideoProcessingStatus;
+}
+
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
   if (!(err instanceof QueryFailedError)) return false;
   const e = err as any;
@@ -69,6 +85,8 @@ export class VideosService {
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
     private readonly storageService: StorageService,
+    @InjectQueue(VIDEO_PROCESSING_QUEUE)
+    private readonly videoProcessingQueue: Queue,
   ) {}
 
   async initiateUpload(
@@ -179,6 +197,76 @@ export class VideosService {
         expiresAt,
       })),
     };
+  }
+
+  async completeUpload(
+    videoId: string,
+    channelId: string,
+    dto: CompleteUploadDto,
+  ): Promise<CompleteUploadResult> {
+    const video = await this.videoRepository.findOneBy({ id: videoId });
+    if (!video) {
+      throw new UploadSessionNotFoundException();
+    }
+    if (video.channel_id !== channelId) {
+      throw new ForbiddenNotOwnerException();
+    }
+    if (video.processing_status !== VideoProcessingStatus.AWAITING_UPLOAD) {
+      throw new UploadAlreadyCompletedException();
+    }
+
+    await this.assertPartsMatchStorage(video, dto);
+
+    const parts: CompletedPart[] = dto.parts.map((part) => ({
+      partNumber: part.part_number,
+      eTag: part.e_tag,
+    }));
+    await this.storageService.completeMultipartUpload(
+      video.object_key,
+      video.upload_id as string,
+      parts,
+    );
+
+    video.processing_status = VideoProcessingStatus.PROCESSING;
+    video.upload_id = null;
+    await this.videoRepository.save(video);
+
+    await this.videoProcessingQueue.add(
+      VIDEO_PROCESS_JOB_NAME,
+      { videoId },
+      {
+        jobId: videoId,
+        attempts: JOB_ATTEMPTS,
+        backoff: { type: 'exponential', delay: JOB_BACKOFF_DELAY_MS },
+      },
+    );
+
+    return {
+      videoId: video.id,
+      processingStatus: video.processing_status,
+    };
+  }
+
+  private async assertPartsMatchStorage(
+    video: Video,
+    dto: CompleteUploadDto,
+  ): Promise<void> {
+    const storageParts = await this.storageService.listParts(
+      video.object_key,
+      video.upload_id as string,
+    );
+    if (storageParts.length !== dto.parts.length) {
+      throw new PartListMismatchException();
+    }
+
+    const eTagByPartNumber = new Map(
+      storageParts.map((part) => [part.partNumber, part.eTag]),
+    );
+    for (const part of dto.parts) {
+      if (eTagByPartNumber.get(part.part_number) !== part.e_tag) {
+        throw new PartListMismatchException();
+      }
+    }
   }
 
   private async createDraftWithRetry(

@@ -1,5 +1,7 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Queue } from 'bullmq';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
@@ -8,6 +10,7 @@ import { AuthService } from '../src/auth/auth.service';
 import { Channel } from '../src/channels/entities/channel.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
+import { VIDEO_PROCESSING_QUEUE } from '../src/queue/queue.constants';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { User } from '../src/users/entities/user.entity';
 import {
@@ -190,6 +193,89 @@ describe('Videos (e2e)', () => {
 
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('UPLOAD_SESSION_NOT_FOUND');
+  });
+
+  // Group 3: Upload Completion (SI-03.7)
+
+  async function initiateAndUploadOnePart(accessToken: string): Promise<{
+    videoId: string;
+    part: { part_number: number; e_tag: string };
+  }> {
+    const videoId = await initiateUploadFor(accessToken);
+    const partsRes = await request(app.getHttpServer())
+      .get(`/videos/uploads/${videoId}/parts`)
+      .query({ from: 1, to: 1 })
+      .set('Authorization', `Bearer ${accessToken}`);
+    const putResponse = await fetch(partsRes.body.parts[0].url, {
+      method: 'PUT',
+      body: Buffer.from('e2e-test-part-content'),
+    });
+    const eTag = putResponse.headers.get('etag') as string;
+
+    return { videoId, part: { part_number: 1, e_tag: eTag } };
+  }
+
+  it('complete-upload-success', async () => {
+    const accessToken = await registerAndLogin('complete-1@example.com');
+    const { videoId, part } = await initiateAndUploadOnePart(accessToken);
+
+    const res = await request(app.getHttpServer())
+      .post(`/videos/uploads/${videoId}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: [part] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.processingStatus).toBe('processing');
+
+    const queue = app.get<Queue>(getQueueToken(VIDEO_PROCESSING_QUEUE));
+    const job = await queue.getJob(videoId);
+    expect(job).toBeDefined();
+  });
+
+  it('complete-upload-already-completed', async () => {
+    const accessToken = await registerAndLogin('complete-2@example.com');
+    const { videoId, part } = await initiateAndUploadOnePart(accessToken);
+    await request(app.getHttpServer())
+      .post(`/videos/uploads/${videoId}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: [part] });
+
+    const res = await request(app.getHttpServer())
+      .post(`/videos/uploads/${videoId}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: [part] });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('UPLOAD_ALREADY_COMPLETED');
+  });
+
+  it('complete-upload-part-mismatch', async () => {
+    const accessToken = await registerAndLogin('complete-3@example.com');
+    const { videoId, part } = await initiateAndUploadOnePart(accessToken);
+
+    const res = await request(app.getHttpServer())
+      .post(`/videos/uploads/${videoId}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        parts: [{ part_number: part.part_number, e_tag: '"not-the-etag"' }],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('PART_LIST_MISMATCH');
+  });
+
+  it('complete-upload-forbidden-not-owner', async () => {
+    const ownerToken = await registerAndLogin('complete-owner@example.com');
+    const { videoId, part } = await initiateAndUploadOnePart(ownerToken);
+    const otherToken = await registerAndLogin('complete-other@example.com');
+
+    const res = await request(app.getHttpServer())
+      .post(`/videos/uploads/${videoId}/complete`)
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({ parts: [part] });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('FORBIDDEN_NOT_OWNER');
   });
 
   // Group 5: Public Delivery (SI-03.12)

@@ -13,4 +13,6 @@ export default registerAs('auth', () => ({
     process.env.PASSWORD_RESET_TOKEN_EXPIRATION_HOURS || '1',
     10,
   ),
+  throttleTtlMs: parseInt(process.env.AUTH_THROTTLE_TTL_MS || '60000', 10),
+  throttleLimit: parseInt(process.env.AUTH_THROTTLE_LIMIT || '10', 10),
 }));

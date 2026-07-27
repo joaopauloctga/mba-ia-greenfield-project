@@ -5,6 +5,7 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   GetObjectCommand,
+  ListPartsCommand,
   PutObjectCommand,
   S3Client,
   UploadPartCommand,
@@ -93,6 +94,21 @@ export class StorageService {
         },
       }),
     );
+  }
+
+  async listParts(key: string, uploadId: string): Promise<CompletedPart[]> {
+    const result = await this.client.send(
+      new ListPartsCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        UploadId: uploadId,
+      }),
+    );
+
+    return (result.Parts ?? []).map((part) => ({
+      partNumber: part.PartNumber as number,
+      eTag: part.ETag as string,
+    }));
   }
 
   async abortMultipartUpload(key: string, uploadId: string): Promise<void> {

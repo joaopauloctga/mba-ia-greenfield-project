@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/13 completed
+**SIs:** 11/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -101,9 +101,17 @@
   - Same pre-existing lint-noise category as prior SIs (`@typescript-eslint/no-unsafe-return`/`unbound-method`/`require-await` on Jest mock patterns in `.spec.ts` files) — no new categories introduced; `npx tsc --noEmit` is clean. A recurring `pg` deprecation warning ("Calling client.query() when the client is already executing a query") surfaced again during this SI's integration run, same as during SI-03.6's — pre-existing across the shared `createTestDataSource`/`cleanAllTables` test harness, not something this SI's code triggers; flagging again as a candidate for separate follow-up, still out of scope here.
 
 ### SI-03.7 — Upload Completion Endpoint (POST /videos/uploads/:videoId/complete)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 6 passing (`src/videos/videos.service.spec.ts`, adding to existing file), 2 passing (`src/videos/videos.service.integration-spec.ts`, adding to existing file), 4 passing (`test/videos.e2e-spec.ts`, adding to existing file) — 12 total across the three files, all green
+- **Observations:**
+  - Added `StorageService.listParts` (`ListPartsCommand`) — not created by SI-03.3 (deferred there explicitly to this SI), needed to compare `dto.parts` against storage's own record per the AC; verified the command shape against context7's `aws-sdk-js-v3` docs (`Parts[].PartNumber`/`.ETag`) since this is the S3 client's first use of `ListParts` in the repo.
+  - Added `UploadAlreadyCompletedException` (409) and `PartListMismatchException` (400) to `common/exceptions/domain.exception.ts` — necessary collateral matching the Error Catalog's `UPLOAD_ALREADY_COMPLETED`/`PART_LIST_MISMATCH` codes; no existing exception covered these.
+  - State-check ordering differs from SI-03.6's `getPartUrls`: this SI's Technical actions list three *distinct* exceptions (`UploadSessionNotFoundException` / `ForbiddenNotOwnerException` / `UploadAlreadyCompletedException`) rather than collapsing "missing or not awaiting_upload" into one 404 — so a video that exists but already left `awaiting_upload` now correctly 409s instead of 404ing, per the AC "calling complete twice returns 409 on the second call".
+  - `video.upload_id` is set back to `null` on the transition to `processing` — not explicitly required by the SI's Technical actions/AC, but directly follows the Data Model's own documented invariant for that column ("present only while `processing_status = 'awaiting_upload'`").
+  - Added `VIDEO_PROCESS_JOB_NAME = 'video.process'` to `queue/queue.constants.ts` (mirrors the existing `VIDEO_PROCESSING_QUEUE` centralization precedent from SI-03.4) and wired `QueueModule` into `VideosModule` for the first time — `VideosService` is the first producer on this queue (SI-03.4 only registered it standalone; SI-03.10/03.11 consume it from the separate worker process, not from the API's module graph).
+  - `CompleteUploadDto` uses `class-validator`'s `@ValidateNested({ each: true })` + `class-transformer`'s `@Type()` — first use of nested-array DTO validation in this repo; confirmed against context7 (`typestack/class-validator`) that this needs the global `ValidationPipe`'s `transform: true` (already set in `main.ts`) to instantiate the nested class, which the project already has.
+  - **Cross-cutting fix (user-approved, out of this SI's file scope):** extending `test/videos.e2e-spec.ts` pushed the shared file's cumulative `registerAndLogin` calls (12, across Groups 1–3) past Phase 02 `AuthModule`'s hardcoded `ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }])`, causing `complete-upload-forbidden-not-owner` to 429 when the whole file ran together (passed fine in isolation). Presented the tradeoffs to the user via AskUserQuestion; user chose "raise the test-env throttler limit". Made the limit env-driven (`AUTH_THROTTLE_TTL_MS`/`AUTH_THROTTLE_LIMIT` in `env.validation.ts` + `auth.config.ts`, defaults unchanged at 60000/10; `auth.module.ts` now uses `ThrottlerModule.forRootAsync`), bumped `.env`/`.env.example` to `AUTH_THROTTLE_LIMIT=30` (headroom for this file plus SI-03.8's pending additions to the same shared spec), and updated the existing `test/auth.e2e-spec.ts` "Rate Limiting" test to read the configured limit dynamically instead of hardcoding 10 requests, so it stays correct regardless of the configured value. Re-ran both e2e files after the change: `videos.e2e-spec.ts` (13/13) and `auth.e2e-spec.ts` (45/45, including both rate-limiting tests) all pass.
+  - `npx tsc --noEmit` is clean. `npm run lint` scoped to every file this SI touched shows no new error categories: production files are lint-clean except one pre-existing, untouched function (`isPgUniqueViolationOnColumn`, predates this SI); test-file errors are the same `@typescript-eslint/no-unsafe-member-access`/`no-unsafe-return`/`unbound-method`/`require-await` categories already documented as pre-existing noise by SI-03.6/SI-03.11 (supertest's untyped `res.body`, `expect(mock.method)` Jest patterns) — left untouched per scope limits.
 
 ### SI-03.8 — Upload Abort Endpoint (DELETE /videos/uploads/:videoId)
 - **Status:** pending

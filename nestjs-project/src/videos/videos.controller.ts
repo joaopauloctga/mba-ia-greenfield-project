@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -11,8 +19,10 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { ChannelsService } from '../channels/channels.service';
 import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
+import { CompleteUploadDto } from './dto/complete-upload.dto';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import {
+  CompleteUploadResult,
   InitiateUploadResult,
   PartUrlsResult,
   VideoDeliveryInfo,
@@ -112,6 +122,53 @@ export class VideosController {
       Number(from),
       Number(to),
     );
+  }
+
+  @Post('uploads/:videoId/complete')
+  @HttpCode(200)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Complete a video upload',
+    description:
+      "Finalizes the S3 multipart upload and enqueues the video for processing once its parts are validated against storage's own record.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Upload completed and processing enqueued',
+    schema: {
+      properties: {
+        videoId: { type: 'string', format: 'uuid' },
+        processingStatus: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Submitted parts don't match storage's ListParts",
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Caller does not own this upload session's channel",
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Upload session not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Upload session is no longer accepting parts',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async completeUpload(
+    @CurrentUser() user: JwtPayload,
+    @Param('videoId') videoId: string,
+    @Body() dto: CompleteUploadDto,
+  ): Promise<CompleteUploadResult> {
+    const channel = await this.channelsService.findByUserId(user.sub);
+    return this.videosService.completeUpload(videoId, channel.id, dto);
   }
 
   @Public()
