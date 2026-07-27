@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/13 completed
+**SIs:** 2/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -14,9 +14,13 @@
   - `S3_BUCKET`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`/`REDIS_HOST` made Joi-required (no default); `S3_ENDPOINT`/`S3_REGION`/`S3_FORCE_PATH_STYLE`/`REDIS_PORT` default, mirroring the existing `DB_*` required-vs-defaulted split in `env.validation.ts`.
 
 ### SI-03.2 — Video Entity and Migration
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 5 passing (`src/videos/entities/video.entity.integration-spec.ts`)
+- **Observations:**
+  - Created `src/videos/videos.module.ts` (bare `TypeOrmModule.forFeature([Video])`) and registered it in `app.module.ts` — not in the SI's Technical actions, but required: adding `Channel`'s inverse `@OneToMany` to `Video` (an explicit Technical action) makes TypeORM's metadata builder require `Video` to be loaded into the app's entity graph, and per `.claude/rules/nestjs-modules.md` every entity must be registered via `forFeature` in its owning module. Without it, `autoLoadEntities` never picks up `Video` and the real app fails to boot with `Entity metadata for Channel#videos was not found`. SI-03.5 will extend this module with the controller/service rather than creating it from scratch.
+  - Added `Video` to the entity arrays of 12 pre-existing test files (`*.module.spec.ts`, `*.service.integration-spec.ts`, `*.entity.integration-spec.ts` across `auth/`, `channels/`, `users/`, `database/`) and to `cleanAllTables()` in `src/test/create-test-data-source.ts` — same root cause as above: any `createTestDataSource(...)` call that includes `Channel` but not `Video` hit the identical metadata error. Verified via full-suite run: all previously-passing suites still pass.
+  - Ran `npm run lint` scoped to every file this SI touched (new + patched) — all clean. The full-repo `npm run lint` has ~190 pre-existing problems in unrelated files (mail service, exception filters, `auth.e2e-spec.ts`, etc.) predating this SI; left untouched per scope limits.
+  - Full-suite run (`npm test -- --runInBand`) surfaced one unrelated pre-existing failure: `src/database/migrations.integration-spec.ts › should apply all migrations and create all four tables` fails with `type "verification_tokens_type_enum" already exists`. Root cause: that spec's `beforeAll` drops the 4 managed tables + `migrations` tracking table but never drops the Postgres enum type `CreateAuthTokens`'s `up()` creates, so once the type exists in the shared dev DB (it has since a migration run in April, well before this session) any full run of that file fails on the first `CREATE TYPE`. Unrelated to `Video`/`Channel` — not touched, per scope limits; flagging for a separate fix.
 
 ### SI-03.9 — FfmpegService (Metadata Extraction and Thumbnail Frame Extraction)
 - **Status:** pending
