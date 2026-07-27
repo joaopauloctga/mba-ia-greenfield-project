@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/13 completed
+**SIs:** 4/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -31,9 +31,13 @@
   - No `FfmpegModule` compilation test — per `testing-guide-nestjs-project`'s `artifacts/modules.md`, a module with only local providers and no configured imports (TypeORM, JWT, Bull, etc.) skips the module test; matches the SI's Tests table, which lists only `FfmpegService`.
 
 ### SI-03.3 — StorageModule (S3 Client Provider, Key Builder, and Presign Helpers)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 5 passing (`src/storage/storage.module.spec.ts`, `src/storage/storage.service.integration-spec.ts`)
+- **Observations:**
+  - Added `src/storage/storage.constants.ts` exporting the `S3_CLIENT` DI token string — not an explicit Technical action, but needed so both `storage.module.ts` (provider) and `storage.service.ts` (`@Inject`) reference the same token without a magic-string duplication; mirrors the repo's `<module>.constants.ts` convention (`auth.constants.ts`, `mail.constants.ts`), even though those hold business constants rather than DI tokens — no existing precedent for a token file, so this establishes one.
+  - Did not create a `listParts` method on `StorageService` even though the plan's `POST /videos/uploads/:videoId/complete` API Contract (SI-03.7) says `completeUpload` "compares `dto.parts` against storage's `ListParts`" — SI-03.3's Technical actions list only `createMultipartUpload`/`presignUploadPart`/`completeMultipartUpload`/`abortMultipartUpload`/`presignGetUrl`/`putObject`; `listParts` isn't among them. Left for SI-03.7 to add when its own Technical actions call for it.
+  - `presignUploadPart` and the default branch of `presignGetUrl` use a 3600s presign expiry (no TD or AC pins an exact value for these two); `presignGetUrl` accepts an optional `expiresIn` override for callers that need a different TTL (e.g., SI-03.12's playback delivery).
+  - Integration spec bundles the key-builder assertions (`buildObjectKey`/`buildThumbnailKey`) into `storage.service.integration-spec.ts` rather than a separate unit spec — the SI's Tests table lists only one `StorageService` row (Integration) covering "key builder shape, multipart create/complete/abort round trip, presigned URL is fetchable" as a single artifact, so no separate `.spec.ts` was created for the pure-logic key builders.
 
 ### SI-03.4 — QueueModule (BullMQ Registration)
 - **Status:** pending
