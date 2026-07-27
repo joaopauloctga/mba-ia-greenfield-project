@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/13 completed
+**SIs:** 5/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -40,9 +40,12 @@
   - Integration spec bundles the key-builder assertions (`buildObjectKey`/`buildThumbnailKey`) into `storage.service.integration-spec.ts` rather than a separate unit spec — the SI's Tests table lists only one `StorageService` row (Integration) covering "key builder shape, multipart create/complete/abort round trip, presigned URL is fetchable" as a single artifact, so no separate `.spec.ts` was created for the pure-logic key builders.
 
 ### SI-03.4 — QueueModule (BullMQ Registration)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 1 passing (`src/queue/queue.module.spec.ts`)
+- **Observations:**
+  - Added `src/queue/queue.constants.ts` exporting `VIDEO_PROCESSING_QUEUE = 'video-processing'` — not an explicit Technical action, but the queue name is a literal the SI's own description says future SIs (VideosService producer, VideoProcessor consumer) will reuse; centralizing it now avoids duplicating the string literal per `.claude/rules/nestjs-common-conventions.md` ("Never duplicate string literals across files"). Mirrors the `S3_CLIENT` token precedent from SI-03.3.
+  - No `defaultJobOptions` (`attempts: 3`, exponential backoff) set on `BullModule.registerQueue()` — the SI's Technical action doesn't call for it, and per the plan's API Contracts (`POST .../complete`), those options are passed per-call at `queue.add(...)` time in SI-03.7's `VideosService.completeUpload`, not baked into the queue registration.
+  - Did not add a dedicated test proving the AC "module fails to compile if `REDIS_HOST`/`REDIS_PORT` are absent" — the SI's Tests table lists only one row (compilation + injectable queue), and that AC explicitly delegates to SI-03.1's Joi validation, already covered by `env.validation.integration-spec.ts`.
 
 ### SI-03.5 — Upload Initiation Endpoint (POST /videos/uploads)
 - **Status:** pending
