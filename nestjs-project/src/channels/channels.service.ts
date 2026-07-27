@@ -21,6 +21,12 @@ function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
 export class ChannelsService {
   constructor(private readonly dataSource: DataSource) {}
 
+  async findByUserId(userId: string): Promise<Channel> {
+    return this.dataSource
+      .getRepository(Channel)
+      .findOneByOrFail({ user_id: userId });
+  }
+
   async createChannel(userId: string, email: string): Promise<Channel> {
     const baseNickname = sanitizeNickname(email.split('@')[0]);
 

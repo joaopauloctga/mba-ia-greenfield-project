@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/13 completed
+**SIs:** 6/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -48,9 +48,15 @@
   - Did not add a dedicated test proving the AC "module fails to compile if `REDIS_HOST`/`REDIS_PORT` are absent" — the SI's Tests table lists only one row (compilation + injectable queue), and that AC explicitly delegates to SI-03.1's Joi validation, already covered by `env.validation.integration-spec.ts`.
 
 ### SI-03.5 — Upload Initiation Endpoint (POST /videos/uploads)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 7 passing (`src/videos/videos.service.spec.ts`, `src/videos/videos.service.integration-spec.ts`, `test/videos.e2e-spec.ts`)
+- **Observations:**
+  - Added `ChannelsService.findByUserId(userId)` — not an explicit Technical action, but necessary: the SI's own signature `VideosService.initiateUpload(channelId, dto)` requires the controller to resolve `channelId` from the JWT payload's `sub` (userId), and no existing mechanism did this. Per CLAUDE.md's Single Responsibility principle, this lookup belongs in `ChannelsService` (its own domain), not in `VideosService`/`VideosController`. Uses `findOneByOrFail` (not a new domain exception) since every authenticated user is guaranteed a channel at registration (`UsersService` → `ChannelsService.createChannel`), making a miss a genuine invariant violation rather than a user-facing error case.
+  - The video's `id` (UUID PK) is generated client-side via `randomUUID()` *before* the insert, so the object key (`videos/{id}/source{ext}`, TD-02) can be computed ahead of the draft row's creation — matches TD-02/TD-10 ("slug minted at draft pre-registration") rather than a two-step insert-then-patch of `object_key`.
+  - Wired `StorageModule` and `ChannelsModule` into `VideosModule` for the first time — neither had been imported by any consumer yet (SI-03.3/SI-03.1 only registered them standalone).
+  - Response fields (`videoId`, `slug`, `uploadId`, `partSize`) use camelCase per the SI's Technical actions prose and the `videos.plan.md` E2E spec (scenario `initiate-upload-success`), even though the Tech Specs' API Contracts table rendered them snake_case (`video_id`, `upload_id`, `part_size`). Confirmed the codebase has no enforced global casing convention (auth's OAuth2-style token fields are snake_case, error envelopes are camelCase), so the more concrete, testable sources (SI prose + spec) were treated as authoritative over the prose table.
+  - `test/videos.e2e-spec.ts` is shared across 5 SIs per its spec frontmatter (`si: SI-03.5, SI-03.6, SI-03.7, SI-03.8, SI-03.12`). This SI authored only the Group 1 (Upload Initiation) scenarios; the file will be extended incrementally as each dependent SI (parts issuance, completion, abort, public delivery) is implemented.
+  - Followed a single flat `describe()` block with a `// Group 1: ...` comment marker (per the `/implement` skill's Step 3a cardinality rule for spec-derived E2E files) rather than nesting a `describe()` per resource, which is how the pre-existing `auth.e2e-spec.ts` is structured — that file predates the spec-driven authoring convention.
 
 ### SI-03.10 — Video Worker Bootstrap (Headless NestJS Worker and Dockerfile.worker)
 - **Status:** pending
