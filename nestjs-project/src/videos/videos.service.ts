@@ -4,6 +4,9 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import {
+  ForbiddenNotOwnerException,
+  InvalidPartRangeException,
+  UploadSessionNotFoundException,
   VideoNotFoundException,
   VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
@@ -16,6 +19,9 @@ const SLUG_COLUMN = 'slug';
 const MAX_SLUG_ATTEMPTS = 3;
 const PART_SIZE_BYTES = 64 * 1024 * 1024;
 const DELIVERY_URL_EXPIRES_SECONDS = 3600;
+const UPLOAD_PART_URL_EXPIRES_SECONDS = 3600;
+const MIN_PART_NUMBER = 1;
+const MAX_PART_NUMBER = 10000;
 
 export interface InitiateUploadResult {
   videoId: string;
@@ -31,6 +37,16 @@ export interface VideoDeliveryInfo {
   streamUrl: string;
   downloadUrl: string;
   expiresAt: string;
+}
+
+export interface PartUrlEntry {
+  partNumber: number;
+  url: string;
+  expiresAt: string;
+}
+
+export interface PartUrlsResult {
+  parts: PartUrlEntry[];
 }
 
 function isPgUniqueViolationOnColumn(err: unknown, column: string): boolean {
@@ -70,9 +86,8 @@ export class VideosService {
       dto,
     );
 
-    const { uploadId } = await this.storageService.createMultipartUpload(
-      objectKey,
-    );
+    const { uploadId } =
+      await this.storageService.createMultipartUpload(objectKey);
 
     video.upload_id = uploadId;
     await this.videoRepository.save(video);
@@ -111,6 +126,58 @@ export class VideosService {
       streamUrl,
       downloadUrl,
       expiresAt,
+    };
+  }
+
+  async getPartUrls(
+    videoId: string,
+    channelId: string,
+    from: number,
+    to: number,
+  ): Promise<PartUrlsResult> {
+    const video = await this.videoRepository.findOneBy({ id: videoId });
+    if (
+      !video ||
+      video.processing_status !== VideoProcessingStatus.AWAITING_UPLOAD
+    ) {
+      throw new UploadSessionNotFoundException();
+    }
+    if (video.channel_id !== channelId) {
+      throw new ForbiddenNotOwnerException();
+    }
+    if (
+      !Number.isInteger(from) ||
+      !Number.isInteger(to) ||
+      from < MIN_PART_NUMBER ||
+      to > MAX_PART_NUMBER ||
+      from > to
+    ) {
+      throw new InvalidPartRangeException();
+    }
+
+    const expiresAt = new Date(
+      Date.now() + UPLOAD_PART_URL_EXPIRES_SECONDS * 1000,
+    ).toISOString();
+    const partNumbers = Array.from(
+      { length: to - from + 1 },
+      (_, i) => from + i,
+    );
+    const urls = await Promise.all(
+      partNumbers.map((partNumber) =>
+        this.storageService.presignUploadPart(
+          video.object_key,
+          video.upload_id as string,
+          partNumber,
+        ),
+      ),
+    );
+
+    return {
+      parts: partNumbers.map((partNumber, i) => ({
+        partNumber,
+        url: urls[i],
+        expiresAt,
+      })),
     };
   }
 

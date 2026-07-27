@@ -119,6 +119,79 @@ describe('Videos (e2e)', () => {
     expect(res.status).toBe(400);
   });
 
+  // Group 2: Part-URL Issuance (SI-03.6)
+
+  async function initiateUploadFor(accessToken: string): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post('/videos/uploads')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ filename: 'clip.mp4', content_type: 'video/mp4' });
+    return res.body.videoId as string;
+  }
+
+  it('get-part-urls-success', async () => {
+    const accessToken = await registerAndLogin('part-urls-1@example.com');
+    const videoId = await initiateUploadFor(accessToken);
+
+    const res = await request(app.getHttpServer())
+      .get(`/videos/uploads/${videoId}/parts`)
+      .query({ from: 1, to: 5 })
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.parts).toHaveLength(5);
+    for (const part of res.body.parts) {
+      expect(part.partNumber).toBeDefined();
+      expect(part.url).toBeDefined();
+      expect(part.expiresAt).toBeDefined();
+    }
+  });
+
+  it('get-part-urls-forbidden-not-owner', async () => {
+    const ownerToken = await registerAndLogin('part-urls-owner@example.com');
+    const videoId = await initiateUploadFor(ownerToken);
+    const otherToken = await registerAndLogin('part-urls-other@example.com');
+
+    const res = await request(app.getHttpServer())
+      .get(`/videos/uploads/${videoId}/parts`)
+      .query({ from: 1, to: 5 })
+      .set('Authorization', `Bearer ${otherToken}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('FORBIDDEN_NOT_OWNER');
+  });
+
+  it('get-part-urls-invalid-range', async () => {
+    const accessToken = await registerAndLogin('part-urls-2@example.com');
+    const videoId = await initiateUploadFor(accessToken);
+
+    const belowMin = await request(app.getHttpServer())
+      .get(`/videos/uploads/${videoId}/parts`)
+      .query({ from: 0, to: 5 })
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(belowMin.status).toBe(400);
+    expect(belowMin.body.error).toBe('INVALID_PART_RANGE');
+
+    const aboveMax = await request(app.getHttpServer())
+      .get(`/videos/uploads/${videoId}/parts`)
+      .query({ from: 1, to: 10001 })
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(aboveMax.status).toBe(400);
+    expect(aboveMax.body.error).toBe('INVALID_PART_RANGE');
+  });
+
+  it('get-part-urls-not-found', async () => {
+    const accessToken = await registerAndLogin('part-urls-3@example.com');
+
+    const res = await request(app.getHttpServer())
+      .get('/videos/uploads/00000000-0000-0000-0000-000000000000/parts')
+      .query({ from: 1, to: 5 })
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('UPLOAD_SESSION_NOT_FOUND');
+  });
+
   // Group 5: Public Delivery (SI-03.12)
 
   let deliverySeedCounter = 0;
@@ -158,9 +231,7 @@ describe('Videos (e2e)', () => {
   it('get-delivery-ready-success', async () => {
     const video = await seedVideoWithStatus(VideoProcessingStatus.READY);
 
-    const res = await request(app.getHttpServer()).get(
-      `/videos/${video.slug}`,
-    );
+    const res = await request(app.getHttpServer()).get(`/videos/${video.slug}`);
 
     expect(res.status).toBe(200);
     expect(res.body.streamUrl).toBeDefined();
@@ -180,9 +251,7 @@ describe('Videos (e2e)', () => {
   it('get-delivery-not-ready', async () => {
     const video = await seedVideoWithStatus(VideoProcessingStatus.PROCESSING);
 
-    const res = await request(app.getHttpServer()).get(
-      `/videos/${video.slug}`,
-    );
+    const res = await request(app.getHttpServer()).get(`/videos/${video.slug}`);
 
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('VIDEO_NOT_READY');

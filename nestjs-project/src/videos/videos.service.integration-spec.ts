@@ -183,3 +183,70 @@ describe('VideosService — getDeliveryInfo (integration)', () => {
     );
   });
 });
+
+describe('VideosService — getPartUrls (integration)', () => {
+  let moduleRef: TestingModule;
+  let videosService: VideosService;
+  let dataSource: DataSource;
+  let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    moduleRef = await createVideosTestModule();
+    videosService = moduleRef.get(VideosService);
+    dataSource = moduleRef.get(DataSource);
+    userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await moduleRef.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let counter = 0;
+  async function createChannel(): Promise<Channel> {
+    counter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `videos_parts_${counter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    return channelRepository.save(
+      channelRepository.create({
+        name: `Channel ${counter}`,
+        nickname: `chan_parts_${counter}`,
+        user_id: user.id,
+      }),
+    );
+  }
+
+  it('issues presigned part URLs that accept real UploadPart PUTs against MinIO', async () => {
+    const channel = await createChannel();
+    const { videoId } = await videosService.initiateUpload(channel.id, {
+      filename: 'clip.mp4',
+      content_type: 'video/mp4',
+    });
+
+    const result = await videosService.getPartUrls(videoId, channel.id, 1, 2);
+
+    expect(result.parts).toHaveLength(2);
+    for (const part of result.parts) {
+      const putResponse = await fetch(part.url, {
+        method: 'PUT',
+        body: Buffer.alloc(1024, part.partNumber),
+      });
+      expect(putResponse.ok).toBe(true);
+      expect(putResponse.headers.get('etag')).toBeTruthy();
+    }
+
+    const persisted = await videoRepository.findOneBy({ id: videoId });
+    expect(persisted!.upload_id).toBeTruthy();
+  });
+});

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/13 completed
+**SIs:** 9/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -79,9 +79,15 @@
   - Extended `test/videos.e2e-spec.ts` with the Group 5 (Public Delivery) scenarios from `videos.plan.md`. Seeds `User`+`Channel`+`Video` directly via TypeORM repositories rather than through the register/login HTTP flow, since the endpoint is anonymous and no caller identity/ownership is relevant to this delivery check — only a valid `channel_id` FK is needed on the seeded `Video` row.
 
 ### SI-03.6 — Part-URL Issuance Endpoint (GET /videos/uploads/:videoId/parts)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 27 passing (`src/videos/videos.service.spec.ts`, adding to existing file), (`src/videos/videos.service.integration-spec.ts`, adding to existing file), 9 passing (`test/videos.e2e-spec.ts`, adding to existing file) — combined run across all three files
+- **Observations:**
+  - Added `UploadSessionNotFoundException` (404), `ForbiddenNotOwnerException` (403), and `InvalidPartRangeException` (400) to `common/exceptions/domain.exception.ts` — necessary collateral matching the Error Catalog's `UPLOAD_SESSION_NOT_FOUND`/`FORBIDDEN_NOT_OWNER`/`INVALID_PART_RANGE` codes; no existing exception covered these.
+  - **Deviated from the Technical action's literal `ParseIntPipe` wording.** The AC explicitly requires non-numeric `from`/`to` to return 400 `INVALID_PART_RANGE`, but `ParseIntPipe` throws NestJS's own `BadRequestException` on non-numeric input, which `ValidationExceptionFilter` maps to `error: 'VALIDATION_ERROR'` — a different code than the AC demands. Implemented `getPartUrls(@Query('from') from: string, @Query('to') to: string)` in the controller (raw strings, no pipe) and pushed `Number(from)`/`Number(to)` conversion + all validation (integer-ness, 1–10000 bounds, `from ≤ to`) into `VideosService.getPartUrls`, which throws `InvalidPartRangeException` uniformly for missing, non-numeric, and out-of-bounds cases. Matches the AC and the Unit test's "range validation" row over the more literal but narrower Technical action prose — same precedent SI-03.5 set for camelCase response fields (prefer the more concrete, testable source).
+  - `UploadSessionNotFoundException` (404) is thrown both when the video row is missing AND when `processing_status` is no longer `awaiting_upload` — per this SI's own Technical action wording ("if missing or not awaiting_upload"). This differs from the Error Catalog's `UPLOAD_ALREADY_COMPLETED` (409) trigger, which is scoped only to the complete/abort endpoints (SI-03.7/SI-03.8), not to part-URL issuance — no AC or spec scenario exercises a non-awaiting-upload video against this endpoint, so the Technical action's explicit instruction was followed as the sole source.
+  - Introduced a local `UPLOAD_PART_URL_EXPIRES_SECONDS = 3600` constant in `videos.service.ts` to compute `expiresAt` for each part URL — mirrors `StorageService.presignUploadPart`'s own internal (non-overridable) default expiry (`DEFAULT_PRESIGN_EXPIRES_SECONDS = 3600` in `storage.service.ts`, set by SI-03.3), since `presignUploadPart` has no `expiresIn` override parameter to source the value from directly.
+  - Extended `test/videos.e2e-spec.ts` with the Group 2 (Part-URL Issuance) scenarios from `videos.plan.md`, adding an `initiateUploadFor(accessToken)` helper reused by all four new tests to obtain a live `videoId`, consistent with the file's flat `describe()` + `// Group N` comment convention.
+  - `npm run lint` (scoped to this SI's touched files) surfaces the same pre-existing category of errors (`@typescript-eslint/no-unsafe-member-access`/`no-unsafe-assignment` on `supertest`'s untyped `res.body`, `@typescript-eslint/unbound-method` on `expect(mock.method)` jest patterns) already present in these same files before this SI (confirmed via `git stash` diff against baseline: 33 pre-existing problems across the touched files before this SI, same categories only, no new violation types introduced by this SI's additions). Consistent with SI-03.2's documented ~190 repo-wide pre-existing lint problems; left untouched per scope limits. `npx tsc --noEmit` is clean.
 
 ### SI-03.11 — Video Processor (Job Consumer: Metadata, Thumbnail, and Status Update)
 - **Status:** pending

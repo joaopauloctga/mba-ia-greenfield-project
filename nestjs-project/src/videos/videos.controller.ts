@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -14,6 +14,7 @@ import { ApiErrorEnvelope } from '../common/openapi/api-error-envelope.dto';
 import { CreateUploadDto } from './dto/create-upload.dto';
 import {
   InitiateUploadResult,
+  PartUrlsResult,
   VideoDeliveryInfo,
   VideosService,
 } from './videos.service';
@@ -56,6 +57,61 @@ export class VideosController {
   ): Promise<InitiateUploadResult> {
     const channel = await this.channelsService.findByUserId(user.sub);
     return this.videosService.initiateUpload(channel.id, dto);
+  }
+
+  @Get('uploads/:videoId/parts')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Issue presigned part-upload URLs',
+    description:
+      'Issues a batch of presigned UploadPart URLs for a range of part numbers on an open upload session.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Presigned part URLs issued',
+    schema: {
+      properties: {
+        parts: {
+          type: 'array',
+          items: {
+            properties: {
+              partNumber: { type: 'number' },
+              url: { type: 'string' },
+              expiresAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'from/to are missing, non-numeric, or out of bounds',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Caller does not own this upload session's channel",
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Upload session not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getPartUrls(
+    @CurrentUser() user: JwtPayload,
+    @Param('videoId') videoId: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ): Promise<PartUrlsResult> {
+    const channel = await this.channelsService.findByUserId(user.sub);
+    return this.videosService.getPartUrls(
+      videoId,
+      channel.id,
+      Number(from),
+      Number(to),
+    );
   }
 
   @Public()

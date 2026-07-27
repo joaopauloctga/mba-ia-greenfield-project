@@ -60,3 +60,21 @@ export class VideoNotReadyException extends DomainException {
     super('VIDEO_NOT_READY', 409, 'Video is not ready for delivery');
   }
 }
+
+export class UploadSessionNotFoundException extends DomainException {
+  constructor() {
+    super('UPLOAD_SESSION_NOT_FOUND', 404, 'Upload session not found');
+  }
+}
+
+export class ForbiddenNotOwnerException extends DomainException {
+  constructor() {
+    super('FORBIDDEN_NOT_OWNER', 403, 'You do not own this upload session');
+  }
+}
+
+export class InvalidPartRangeException extends DomainException {
+  constructor() {
+    super('INVALID_PART_RANGE', 400, 'Invalid part range');
+  }
+}

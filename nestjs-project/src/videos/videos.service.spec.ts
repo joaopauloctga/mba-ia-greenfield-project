@@ -2,6 +2,9 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
 import {
+  ForbiddenNotOwnerException,
+  InvalidPartRangeException,
+  UploadSessionNotFoundException,
   VideoNotFoundException,
   VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
@@ -126,9 +129,9 @@ describe('VideosService — getDeliveryInfo', () => {
   it('throws VideoNotFoundException when no video matches the slug', async () => {
     videoRepository.findOneBy.mockResolvedValue(null);
 
-    await expect(
-      videosService.getDeliveryInfo('missing-slug'),
-    ).rejects.toThrow(VideoNotFoundException);
+    await expect(videosService.getDeliveryInfo('missing-slug')).rejects.toThrow(
+      VideoNotFoundException,
+    );
     expect(storageService.presignGetUrl).not.toHaveBeenCalled();
   });
 
@@ -141,5 +144,110 @@ describe('VideosService — getDeliveryInfo', () => {
       VideoNotReadyException,
     );
     expect(storageService.presignGetUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe('VideosService — getPartUrls', () => {
+  let videosService: VideosService;
+  let videoRepository: { findOneBy: jest.Mock };
+  let storageService: jest.Mocked<StorageService>;
+
+  const openVideo = {
+    id: 'video-1',
+    channel_id: 'channel-1',
+    object_key: 'videos/video-1/source.mp4',
+    upload_id: 'upload-1',
+    processing_status: VideoProcessingStatus.AWAITING_UPLOAD,
+  };
+
+  beforeEach(async () => {
+    videoRepository = {
+      findOneBy: jest.fn(),
+    };
+    storageService = {
+      presignUploadPart: jest
+        .fn()
+        .mockImplementation(
+          async (_key: string, _uploadId: string, partNumber: number) =>
+            `https://storage.example/part-${partNumber}`,
+        ),
+    } as unknown as jest.Mocked<StorageService>;
+
+    const module = await Test.createTestingModule({
+      providers: [
+        VideosService,
+        { provide: getRepositoryToken(Video), useValue: videoRepository },
+        { provide: StorageService, useValue: storageService },
+      ],
+    }).compile();
+
+    videosService = module.get(VideosService);
+  });
+
+  it('returns one presigned URL per part number in range', async () => {
+    videoRepository.findOneBy.mockResolvedValue(openVideo);
+
+    const result = await videosService.getPartUrls(
+      'video-1',
+      'channel-1',
+      1,
+      5,
+    );
+
+    expect(result.parts).toHaveLength(5);
+    expect(result.parts.map((p) => p.partNumber)).toEqual([1, 2, 3, 4, 5]);
+    expect(result.parts[0].url).toBe('https://storage.example/part-1');
+    expect(result.parts.every((p) => p.expiresAt)).toBe(true);
+    expect(storageService.presignUploadPart).toHaveBeenCalledTimes(5);
+    expect(storageService.presignUploadPart).toHaveBeenCalledWith(
+      openVideo.object_key,
+      openVideo.upload_id,
+      3,
+    );
+  });
+
+  it('throws UploadSessionNotFoundException when no video matches videoId', async () => {
+    videoRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      videosService.getPartUrls('missing', 'channel-1', 1, 5),
+    ).rejects.toThrow(UploadSessionNotFoundException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+
+  it('throws UploadSessionNotFoundException when the video is no longer awaiting upload', async () => {
+    videoRepository.findOneBy.mockResolvedValue({
+      ...openVideo,
+      processing_status: VideoProcessingStatus.PROCESSING,
+    });
+
+    await expect(
+      videosService.getPartUrls('video-1', 'channel-1', 1, 5),
+    ).rejects.toThrow(UploadSessionNotFoundException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenNotOwnerException when the caller channel does not own the video', async () => {
+    videoRepository.findOneBy.mockResolvedValue(openVideo);
+
+    await expect(
+      videosService.getPartUrls('video-1', 'other-channel', 1, 5),
+    ).rejects.toThrow(ForbiddenNotOwnerException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['from below 1', 0, 5],
+    ['to above 10000', 1, 10001],
+    ['from greater than to', 5, 1],
+    ['non-numeric from', NaN, 5],
+    ['non-numeric to', 1, NaN],
+  ])('throws InvalidPartRangeException for %s', async (_label, from, to) => {
+    videoRepository.findOneBy.mockResolvedValue(openVideo);
+
+    await expect(
+      videosService.getPartUrls('video-1', 'channel-1', from, to),
+    ).rejects.toThrow(InvalidPartRangeException);
+    expect(storageService.presignUploadPart).not.toHaveBeenCalled();
   });
 });
