@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -169,6 +170,41 @@ export class VideosController {
   ): Promise<CompleteUploadResult> {
     const channel = await this.channelsService.findByUserId(user.sub);
     return this.videosService.completeUpload(videoId, channel.id, dto);
+  }
+
+  @Delete('uploads/:videoId')
+  @HttpCode(204)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Abort a video upload',
+    description:
+      'Cancels an in-progress upload session, releasing the multipart upload in storage and removing the draft video row.',
+  })
+  @ApiResponse({
+    status: 204,
+    description: 'Upload session aborted',
+  })
+  @ApiResponse({
+    status: 403,
+    description: "Caller does not own this upload session's channel",
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Upload session not found',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Upload session is no longer accepting parts',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async abortUpload(
+    @CurrentUser() user: JwtPayload,
+    @Param('videoId') videoId: string,
+  ): Promise<void> {
+    const channel = await this.channelsService.findByUserId(user.sub);
+    await this.videosService.abortUpload(videoId, channel.id);
   }
 
   @Public()

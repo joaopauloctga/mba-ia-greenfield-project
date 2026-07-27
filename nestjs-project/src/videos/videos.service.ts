@@ -247,6 +247,25 @@ export class VideosService {
     };
   }
 
+  async abortUpload(videoId: string, channelId: string): Promise<void> {
+    const video = await this.videoRepository.findOneBy({ id: videoId });
+    if (!video) {
+      throw new UploadSessionNotFoundException();
+    }
+    if (video.channel_id !== channelId) {
+      throw new ForbiddenNotOwnerException();
+    }
+    if (video.processing_status !== VideoProcessingStatus.AWAITING_UPLOAD) {
+      throw new UploadAlreadyCompletedException();
+    }
+
+    await this.storageService.abortMultipartUpload(
+      video.object_key,
+      video.upload_id as string,
+    );
+    await this.videoRepository.remove(video);
+  }
+
   private async assertPartsMatchStorage(
     video: Video,
     dto: CompleteUploadDto,

@@ -352,3 +352,66 @@ describe('VideosService — completeUpload (integration)', () => {
     ).rejects.toThrow(PartListMismatchException);
   });
 });
+
+describe('VideosService — abortUpload (integration)', () => {
+  let moduleRef: TestingModule;
+  let videosService: VideosService;
+  let storageService: StorageService;
+  let dataSource: DataSource;
+  let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
+  let videoRepository: Repository<Video>;
+
+  beforeAll(async () => {
+    moduleRef = await createVideosTestModule();
+    videosService = moduleRef.get(VideosService);
+    storageService = moduleRef.get(StorageService);
+    dataSource = moduleRef.get(DataSource);
+    userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
+    videoRepository = dataSource.getRepository(Video);
+  });
+
+  afterAll(async () => {
+    await moduleRef.close();
+  });
+
+  beforeEach(async () => {
+    await cleanAllTables(dataSource);
+  });
+
+  let counter = 0;
+  async function createChannel(): Promise<Channel> {
+    counter += 1;
+    const user = await userRepository.save(
+      userRepository.create({
+        email: `videos_abort_${counter}@example.com`,
+        password: 'hashed',
+      }),
+    );
+    return channelRepository.save(
+      channelRepository.create({
+        name: `Channel ${counter}`,
+        nickname: `chan_abort_${counter}`,
+        user_id: user.id,
+      }),
+    );
+  }
+
+  it('aborts a real multipart upload and deletes the draft row', async () => {
+    const channel = await createChannel();
+    const { videoId, uploadId } = await videosService.initiateUpload(
+      channel.id,
+      { filename: 'clip.mp4', content_type: 'video/mp4' },
+    );
+    const video = await videoRepository.findOneByOrFail({ id: videoId });
+
+    await videosService.abortUpload(videoId, channel.id);
+
+    const persisted = await videoRepository.findOneBy({ id: videoId });
+    expect(persisted).toBeNull();
+    await expect(
+      storageService.listParts(video.object_key, uploadId),
+    ).rejects.toThrow();
+  });
+});

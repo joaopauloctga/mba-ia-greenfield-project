@@ -402,3 +402,88 @@ describe('VideosService — completeUpload', () => {
     expect(queue.add).not.toHaveBeenCalled();
   });
 });
+
+describe('VideosService — abortUpload', () => {
+  let videosService: VideosService;
+  let videoRepository: { findOneBy: jest.Mock; remove: jest.Mock };
+  let storageService: jest.Mocked<StorageService>;
+
+  const openVideo = {
+    id: 'video-1',
+    channel_id: 'channel-1',
+    object_key: 'videos/video-1/source.mp4',
+    upload_id: 'upload-1',
+    processing_status: VideoProcessingStatus.AWAITING_UPLOAD,
+  };
+
+  beforeEach(async () => {
+    videoRepository = {
+      findOneBy: jest.fn(),
+      remove: jest.fn(async (input) => input),
+    };
+    storageService = {
+      abortMultipartUpload: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<StorageService>;
+
+    const module = await Test.createTestingModule({
+      providers: [
+        VideosService,
+        { provide: getRepositoryToken(Video), useValue: videoRepository },
+        { provide: StorageService, useValue: storageService },
+        {
+          provide: getQueueToken(VIDEO_PROCESSING_QUEUE),
+          useValue: { add: jest.fn() },
+        },
+      ],
+    }).compile();
+
+    videosService = module.get(VideosService);
+  });
+
+  it('aborts the multipart upload and removes the draft row', async () => {
+    videoRepository.findOneBy.mockResolvedValue({ ...openVideo });
+
+    await videosService.abortUpload('video-1', 'channel-1');
+
+    expect(storageService.abortMultipartUpload).toHaveBeenCalledWith(
+      openVideo.object_key,
+      openVideo.upload_id,
+    );
+    expect(videoRepository.remove).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'video-1' }),
+    );
+  });
+
+  it('throws UploadSessionNotFoundException when no video matches videoId', async () => {
+    videoRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      videosService.abortUpload('missing', 'channel-1'),
+    ).rejects.toThrow(UploadSessionNotFoundException);
+    expect(storageService.abortMultipartUpload).not.toHaveBeenCalled();
+    expect(videoRepository.remove).not.toHaveBeenCalled();
+  });
+
+  it('throws ForbiddenNotOwnerException when the caller channel does not own the video', async () => {
+    videoRepository.findOneBy.mockResolvedValue({ ...openVideo });
+
+    await expect(
+      videosService.abortUpload('video-1', 'other-channel'),
+    ).rejects.toThrow(ForbiddenNotOwnerException);
+    expect(storageService.abortMultipartUpload).not.toHaveBeenCalled();
+    expect(videoRepository.remove).not.toHaveBeenCalled();
+  });
+
+  it('throws UploadAlreadyCompletedException when the session left awaiting_upload', async () => {
+    videoRepository.findOneBy.mockResolvedValue({
+      ...openVideo,
+      processing_status: VideoProcessingStatus.PROCESSING,
+    });
+
+    await expect(
+      videosService.abortUpload('video-1', 'channel-1'),
+    ).rejects.toThrow(UploadAlreadyCompletedException);
+    expect(storageService.abortMultipartUpload).not.toHaveBeenCalled();
+    expect(videoRepository.remove).not.toHaveBeenCalled();
+  });
+});

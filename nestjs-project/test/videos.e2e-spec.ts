@@ -11,6 +11,7 @@ import { Channel } from '../src/channels/entities/channel.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../src/common/filters/validation-exception.filter';
 import { VIDEO_PROCESSING_QUEUE } from '../src/queue/queue.constants';
+import { StorageService } from '../src/storage/storage.service';
 import { cleanAllTables } from '../src/test/create-test-data-source';
 import { User } from '../src/users/entities/user.entity';
 import {
@@ -273,6 +274,59 @@ describe('Videos (e2e)', () => {
       .post(`/videos/uploads/${videoId}/complete`)
       .set('Authorization', `Bearer ${otherToken}`)
       .send({ parts: [part] });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('FORBIDDEN_NOT_OWNER');
+  });
+
+  // Group 4: Upload Abort (SI-03.8)
+
+  it('abort-upload-success', async () => {
+    const accessToken = await registerAndLogin('abort-1@example.com');
+    const videoId = await initiateUploadFor(accessToken);
+    const videoRepository = dataSource.getRepository(Video);
+    const video = await videoRepository.findOneByOrFail({ id: videoId });
+
+    const res = await request(app.getHttpServer())
+      .delete(`/videos/uploads/${videoId}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(204);
+    expect(res.body).toEqual({});
+
+    const persisted = await videoRepository.findOneBy({ id: videoId });
+    expect(persisted).toBeNull();
+
+    const storageService = app.get(StorageService);
+    await expect(
+      storageService.listParts(video.object_key, video.upload_id as string),
+    ).rejects.toThrow();
+  });
+
+  it('abort-upload-already-completed', async () => {
+    const accessToken = await registerAndLogin('abort-2@example.com');
+    const { videoId, part } = await initiateAndUploadOnePart(accessToken);
+    await request(app.getHttpServer())
+      .post(`/videos/uploads/${videoId}/complete`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ parts: [part] });
+
+    const res = await request(app.getHttpServer())
+      .delete(`/videos/uploads/${videoId}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('UPLOAD_ALREADY_COMPLETED');
+  });
+
+  it('abort-upload-forbidden-not-owner', async () => {
+    const ownerToken = await registerAndLogin('abort-owner@example.com');
+    const videoId = await initiateUploadFor(ownerToken);
+    const otherToken = await registerAndLogin('abort-other@example.com');
+
+    const res = await request(app.getHttpServer())
+      .delete(`/videos/uploads/${videoId}`)
+      .set('Authorization', `Bearer ${otherToken}`);
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('FORBIDDEN_NOT_OWNER');
