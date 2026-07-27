@@ -5,9 +5,11 @@ import databaseConfig from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
 import queueConfig from './config/queue.config';
 import storageConfig from './config/storage.config';
+import { Channel } from './channels/entities/channel.entity';
 import { FfmpegModule } from './ffmpeg/ffmpeg.module';
 import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
+import { User } from './users/entities/user.entity';
 import { Video } from './videos/entities/video.entity';
 import { VideoProcessor } from './videos/video.processor';
 
@@ -33,7 +35,7 @@ import { VideoProcessor } from './videos/video.processor';
         synchronize: false,
       }),
     }),
-    TypeOrmModule.forFeature([Video]),
+    TypeOrmModule.forFeature([Video, Channel, User]),
     StorageModule,
     QueueModule,
     FfmpegModule,

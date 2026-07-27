@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 12/13 completed
+**SIs:** 13/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -123,6 +123,11 @@
   - `npx tsc --noEmit` clean. Lint: no new error categories in `videos.service.ts`/`videos.controller.ts` beyond the same 6 pre-existing errors in the untouched `isPgUniqueViolationOnColumn` helper (flagged since before this SI); test-file errors are the same documented `no-unsafe-member-access`/`unbound-method`/`require-await` noise from SI-03.6/03.7/03.11 — left untouched per scope limits.
 
 ### SI-03.13 — Reconciliation Sweep for Stuck Processing Jobs
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 6 passing (`src/videos/video.processor.spec.ts`, adding to existing file: 3 new reconcile-branch tests + 3 pre-existing) — matches the SI's Tests table (Unit only, query filter + re-enqueue call, mocked repo/queue)
+- **Observations:**
+  - Added `src/queue/reconcile-scheduler.service.ts` — an `OnModuleInit` provider registered in `QueueModule`'s `providers` (not an explicit Technical action file, but the mechanism for "a BullMQ repeatable job registration in `QueueModule`'s bootstrap": `QueueModule` had no providers before this SI, so a small provider is the natural place to call `queue.add('reconcile', {}, { repeat: {...} })` once per process boot). Confirmed via context7 (`taskforcesh/bullmq`) that repeated `add()` calls with identical `repeat` options are deduplicated by BullMQ itself, so both the API process (via `VideosModule → QueueModule`) and the worker process (via `WorkerModule → QueueModule`) safely register the same schedule without creating duplicates.
+  - Added `RECONCILE_JOB_NAME`, `RECONCILE_STALE_THRESHOLD_MS`, `VIDEO_PROCESS_JOB_ATTEMPTS`, `VIDEO_PROCESS_JOB_BACKOFF_DELAY_MS` to `queue/queue.constants.ts` — the latter two centralize the retry contract for re-enqueued `video.process` jobs so the reconcile branch doesn't duplicate SI-03.7's local literals; `VideosService`'s own local constants were left untouched (out of this SI's scope to refactor a completed SI's file for a minor literal-duplication concern).
+  - `VideoProcessor.process()` now branches on `job.name`: the `reconcile` branch queries `videos` where `processing_status = 'processing' AND updated_at < now() - 15m` and re-enqueues each with `jobId: video.id` (same dedup contract as the original enqueue); this required adding `@InjectQueue(VIDEO_PROCESSING_QUEUE)` to `VideoProcessor`'s constructor, which in turn required adding a mock queue provider to `video.processor.integration-spec.ts`'s test module (SI-03.11's file) since its DI graph now needs one — necessary collateral, not scope creep.
+  - **Found and fixed a real, pre-existing bug in `WorkerModule` (from completed SI-03.11), with user approval.** Running `src/worker.module.spec.ts` standalone hung indefinitely / eventually threw `Entity metadata for Video#channel was not found` in a retry loop that never fails fast (NestJS's TypeORM wrapper misreports the entity-metadata build error as a connectivity issue). Root cause: `WorkerModule` registers `TypeOrmModule.forFeature([Video])`, but `Video`'s `@ManyToOne(() => Channel, ...)` inverse relation needs `Channel`'s metadata too, and `Channel` was never registered anywhere in `WorkerModule`'s import graph (added by SI-03.11 without it, undetected because `worker.module.spec.ts` wasn't re-run after that change). This meant the **real worker Docker image currently cannot boot**, not just a test artifact. Presented the issue and fix via AskUserQuestion; user approved fixing immediately. Fix: `TypeOrmModule.forFeature([Video, Channel, User])` in `worker.module.ts` (`User` also needed — `Channel` has its own inverse `@OneToOne(() => User, ...)`). Verified: `worker.module.spec.ts` now passes in under a second, no hang.
+  - `npx tsc --noEmit` clean. Lint: `video.processor.ts` had one new prettier formatting error (multi-import line), auto-fixed via `eslint --fix`; all other touched production files clean; no new lint error categories anywhere.

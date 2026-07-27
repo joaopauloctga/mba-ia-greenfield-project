@@ -1,3 +1,4 @@
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -6,6 +7,7 @@ import { DataSource, Repository } from 'typeorm';
 import { Channel } from '../channels/entities/channel.entity';
 import storageConfig from '../config/storage.config';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
+import { VIDEO_PROCESSING_QUEUE } from '../queue/queue.constants';
 import { StorageModule } from '../storage/storage.module';
 import { StorageService } from '../storage/storage.service';
 import {
@@ -53,6 +55,10 @@ describe('VideoProcessor — process (integration)', () => {
       providers: [
         VideoProcessor,
         { provide: FfmpegService, useValue: ffmpegService },
+        {
+          provide: getQueueToken(VIDEO_PROCESSING_QUEUE),
+          useValue: { add: jest.fn() },
+        },
       ],
     }).compile();
 
