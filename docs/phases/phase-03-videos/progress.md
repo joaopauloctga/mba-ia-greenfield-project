@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/13 completed
+**SIs:** 10/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -90,9 +90,15 @@
   - `npm run lint` (scoped to this SI's touched files) surfaces the same pre-existing category of errors (`@typescript-eslint/no-unsafe-member-access`/`no-unsafe-assignment` on `supertest`'s untyped `res.body`, `@typescript-eslint/unbound-method` on `expect(mock.method)` jest patterns) already present in these same files before this SI (confirmed via `git stash` diff against baseline: 33 pre-existing problems across the touched files before this SI, same categories only, no new violation types introduced by this SI's additions). Consistent with SI-03.2's documented ~190 repo-wide pre-existing lint problems; left untouched per scope limits. `npx tsc --noEmit` is clean.
 
 ### SI-03.11 — Video Processor (Job Consumer: Metadata, Thumbnail, and Status Update)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 4 passing (3 unit in `src/videos/video.processor.spec.ts`, 1 integration in `src/videos/video.processor.integration-spec.ts`)
+- **Observations:**
+  - Queried context7 (`/taskforcesh/bullmq`) before implementing `@OnWorkerEvent('failed')`'s final-attempt check — confirmed `job.attemptsMade` is incremented by `moveToFailed` *before* the `'failed'` event fires, so `job.attemptsMade >= job.opts.attempts` correctly identifies "no more retries left" at the moment the handler runs. This was a genuine correctness risk (get the comparison direction/timing wrong and either mark `failed` one retry too early, or never mark it after real exhaustion), not a trivial lookup.
+  - `processing_error` on final failure is a fully static, hardcoded string (`'Video processing failed after exhausting all retry attempts'`) rather than `err.message` or any error content — the AC requires the persisted error to "never contain a presigned URL", and `FfmpegProcessError`'s `stderr` capture can legitimately echo back the input URL (ffmpeg/ffprobe often print the failing input path in their error output). A static message eliminates that leak surface entirely rather than attempting to sanitize/regex-strip it.
+  - Wired `TypeOrmModule.forFeature([Video])` and `VideoProcessor` into `WorkerModule` directly (not via `VideosModule`) — matches SI-03.10's own forward note ("SI-03.11 ... will add `forFeature([Video])` directly to `WorkerModule` when it needs repository access"); importing `VideosModule` would also pull in `VideosController`, which the worker image must not expose.
+  - Integration test mocks `FfmpegService` (real DB + real MinIO via `StorageModule`, mocked ffmpeg only) rather than spawning real `ffprobe`/`ffmpeg` binaries — confirmed via `Dockerfile.dev` vs `Dockerfile.worker` that the `nestjs-api` image (where `npm test` runs, per this subproject's CLAUDE.md) does not install ffmpeg, only the `video-worker` image does. `FfmpegService`'s own unit spec (SI-03.9) already mocks `child_process` for the same reason. This matches the SI's own Tests table wording ("real DB status/duration/thumbnail_key transition on success" — the DB/storage contract is what's under test, not the ffmpeg binary itself).
+  - `onFailed`'s "not final attempt" unit case and the DB persistence itself are Unit-covered per the Tests table's "failure path" wording; the Integration row only asks for the success-path DB transition, so no `onFailed` integration test was added — consistent with the table's explicit scope.
+  - Same pre-existing lint-noise category as prior SIs (`@typescript-eslint/no-unsafe-return`/`unbound-method`/`require-await` on Jest mock patterns in `.spec.ts` files) — no new categories introduced; `npx tsc --noEmit` is clean. A recurring `pg` deprecation warning ("Calling client.query() when the client is already executing a query") surfaced again during this SI's integration run, same as during SI-03.6's — pre-existing across the shared `createTestDataSource`/`cleanAllTables` test harness, not something this SI's code triggers; flagging again as a candidate for separate follow-up, still out of scope here.
 
 ### SI-03.7 — Upload Completion Endpoint (POST /videos/uploads/:videoId/complete)
 - **Status:** pending

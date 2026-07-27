@@ -8,6 +8,8 @@ import storageConfig from './config/storage.config';
 import { FfmpegModule } from './ffmpeg/ffmpeg.module';
 import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
+import { Video } from './videos/entities/video.entity';
+import { VideoProcessor } from './videos/video.processor';
 
 @Module({
   imports: [
@@ -31,9 +33,11 @@ import { StorageModule } from './storage/storage.module';
         synchronize: false,
       }),
     }),
+    TypeOrmModule.forFeature([Video]),
     StorageModule,
     QueueModule,
     FfmpegModule,
   ],
+  providers: [VideoProcessor],
 })
 export class WorkerModule {}
