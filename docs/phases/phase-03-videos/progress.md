@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/13 completed
+**SIs:** 7/13 completed
 
 ### SI-03.1 — Dependencies, Storage/Queue Configuration Namespaces, and Docker Compose Infrastructure
 - **Status:** completed
@@ -59,9 +59,13 @@
   - Followed a single flat `describe()` block with a `// Group 1: ...` comment marker (per the `/implement` skill's Step 3a cardinality rule for spec-derived E2E files) rather than nesting a `describe()` per resource, which is how the pre-existing `auth.e2e-spec.ts` is structured — that file predates the spec-driven authoring convention.
 
 ### SI-03.10 — Video Worker Bootstrap (Headless NestJS Worker and Dockerfile.worker)
-- **Status:** pending
-- **Tests:** no tests
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 1 passing (`src/worker.module.spec.ts`)
+- **Observations:**
+  - `WorkerModule` registers `TypeOrmModule.forRootAsync` directly (not by importing `VideosModule`), since importing any domain module would also pull in its controller — the SI's own AC explicitly requires the worker image to exclude HTTP controllers/guards. No `TypeOrmModule.forFeature([...])` is registered yet because this SI has no consumer of any entity repository; SI-03.11 (Video Processor) will add `forFeature([Video])` directly to `WorkerModule` when it needs repository access.
+  - `WorkerModule`'s `ConfigModule.forRoot` reuses the full `envValidationSchema` (same Joi schema as `AppModule`) rather than a worker-specific subset — the worker shares the same `.env` file per the SI's own Technical action ("sharing the same env file as nestjs-api"), so every required key is already present, and reusing the schema gives the worker the same fail-fast behavior as the API instead of booting silently with a missing S3/Redis var.
+  - `Dockerfile.worker` mirrors `Dockerfile.dev`'s bind-mount development model (no `COPY`/build step baked into the image; `.`. is bind-mounted at `/home/node/app` in `compose.yaml`) rather than a production multi-stage build — consistent with how `nestjs-api` itself is run in this repo. Its `CMD` runs the compiled `node dist/main.worker.js` directly (unlike `nestjs-api`'s idle `tail -f /dev/null`), since the worker has no interactive dev workflow — it's meant to run continuously, not be `exec`'d into for `start:dev`.
+  - Verified manually (not by an automated test, since this AC is Docker-level, not a Jest concern): rebuilt `dist/`, built the `video-worker` image, ran `docker compose up -d video-worker` — container stays up (not crash-looping), `docker compose exec video-worker ffmpeg -version` and `ffprobe -version` both succeed, and the boot log shows only `WorkerModule`/`TypeOrmModule`/`QueueModule`/`FfmpegModule`/`StorageModule`/`BullModule` initializing — no `RoutesResolver` or controller mapping, confirming no HTTP surface ships in this image.
 
 ### SI-03.12 — Public Video Delivery Endpoint (GET /videos/:slug)
 - **Status:** pending
