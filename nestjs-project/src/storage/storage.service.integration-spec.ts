@@ -24,9 +24,7 @@ describe('StorageService (integration)', () => {
   });
 
   it('builds the source and thumbnail object keys per TD-02', () => {
-    expect(service.buildObjectKey('abc', '.mp4')).toBe(
-      'videos/abc/source.mp4',
-    );
+    expect(service.buildObjectKey('abc', '.mp4')).toBe('videos/abc/source.mp4');
     expect(service.buildThumbnailKey('abc')).toBe('videos/abc/thumbnail.jpg');
   });
 
@@ -69,8 +67,6 @@ describe('StorageService (integration)', () => {
     });
     const response = await fetch(url);
     expect(response.ok).toBe(true);
-    expect(response.headers.get('content-disposition')).toContain(
-      'attachment',
-    );
+    expect(response.headers.get('content-disposition')).toContain('attachment');
   });
 });

@@ -13,6 +13,8 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `docker compose ps minio` — expect status `healthy` (the `mc` one-shot service creates the bucket and then exits with code 0; `service_completed_successfully` is its normal end state, not a failure)
 
 Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
@@ -34,6 +36,11 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP capture, SMTP `1025`, UI on `8125`
+- `redis` — Redis 7, port `6379`, backs the BullMQ video-processing queue
+- `minio` — S3-compatible object storage, port `9000`, user/password `streamtube`/`streamtube123`
+- `mc` — one-shot job that creates the `streamtube` bucket, then exits
+- `video-worker` — headless NestJS process (`WorkerModule`) that consumes the queue and runs FFmpeg
 
 All verification and teardown commands run on the **host machine**:
 
@@ -78,8 +85,14 @@ npm run format                           # Prettier formatting
 ```bash
 docker compose ps
 docker compose logs nestjs-api
+docker compose logs video-worker
 docker compose exec db pg_isready -U streamtube
+docker compose exec redis redis-cli ping
 curl http://localhost:3000
+
+# Queue depth (jobs waiting vs. being processed)
+docker compose exec redis redis-cli LLEN bull:video-processing:wait
+docker compose exec redis redis-cli LLEN bull:video-processing:active
 ```
 
 ### Test execution
@@ -148,6 +161,21 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+### Two entry points
+
+This codebase boots as **two different processes** from the same source tree:
+
+| Entry point | Root module | Container | Purpose |
+|---|---|---|---|
+| `src/main.ts` | `AppModule` | `nestjs-api` | HTTP API |
+| `src/main.worker.ts` | `WorkerModule` | `video-worker` | Queue consumer (no HTTP server — `NestFactory.createApplicationContext`) |
+
+`WorkerModule` deliberately imports only what processing needs (TypeORM, `StorageModule`, `QueueModule`, `FfmpegModule`, `VideoProcessor`) — it does not import `AppModule`, so controllers, guards and mail are absent from the worker.
+
+**Operational gotcha:** `Dockerfile.worker` runs `node dist/main.worker.js` with the source volume-mounted, and there is no watch mode. Changes to worker code only take effect after `npm run build` **and** `docker compose restart video-worker`. A worker running against a stale `dist/` silently stops consuming — jobs pile up in `bull:video-processing:wait` with nothing in `active`, and the worker logs nothing (there is no per-job logging). Check the queue depths above when processing appears stuck.
+
+For the video upload/processing/delivery flow, its endpoints and the status lifecycle, see the root `CLAUDE.md` → "Videos (Phase 03)".
 
 ## Code Conventions
 
