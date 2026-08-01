@@ -27,6 +27,7 @@ describe('ChannelsService (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 

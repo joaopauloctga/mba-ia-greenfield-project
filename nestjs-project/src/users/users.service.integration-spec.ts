@@ -29,6 +29,7 @@ describe('UsersService (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 

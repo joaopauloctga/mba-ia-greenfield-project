@@ -49,6 +49,7 @@ describe('Auth (e2e)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await app.close();
   });
 
@@ -694,6 +695,7 @@ describe('Rate Limiting (e2e)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await app.close();
   });
 
