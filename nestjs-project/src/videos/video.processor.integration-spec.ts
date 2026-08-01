@@ -71,6 +71,7 @@ describe('VideoProcessor — process (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await moduleRef.close();
   });
 

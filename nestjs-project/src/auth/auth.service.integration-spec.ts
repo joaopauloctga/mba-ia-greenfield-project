@@ -106,6 +106,7 @@ describe('AuthService — register (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -197,6 +198,7 @@ describe('AuthService — confirm (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -266,6 +268,7 @@ describe('AuthService — resendConfirmation (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -320,6 +323,7 @@ describe('AuthService — login (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -399,6 +403,7 @@ describe('AuthService — refresh (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -515,6 +520,7 @@ describe('AuthService — logout (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -585,6 +591,7 @@ describe('AuthService — forgotPassword (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
@@ -670,6 +677,7 @@ describe('AuthService — resetPassword (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 
