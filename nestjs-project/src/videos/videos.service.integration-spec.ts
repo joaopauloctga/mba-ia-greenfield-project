@@ -60,6 +60,7 @@ describe('VideosService — initiateUpload (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await moduleRef.close();
   });
 
@@ -157,6 +158,7 @@ describe('VideosService — getDeliveryInfo (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await moduleRef.close();
   });
 
@@ -241,6 +243,7 @@ describe('VideosService — getPartUrls (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await moduleRef.close();
   });
 
@@ -310,6 +313,7 @@ describe('VideosService — completeUpload (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await moduleRef.close();
   });
 
@@ -401,6 +405,7 @@ describe('VideosService — abortUpload (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await moduleRef.close();
   });
 

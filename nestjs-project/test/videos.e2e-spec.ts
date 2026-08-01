@@ -46,6 +46,7 @@ describe('Videos (e2e)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await app.close();
   });
 

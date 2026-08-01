@@ -23,6 +23,8 @@ description: 'Testing conventions for NestJS unit, integration, and e2e tests'
 - Use `Test.createTestingModule()` from `@nestjs/testing` to set up the test module
 - Use a real database — connect to the Docker `db` service (env vars from `.env` are available inside the container)
 - **Table cleanup:** `repository.delete({})` throws `Empty criteria(s) are not allowed`. Use `dataSource.query('DELETE FROM table_name')` or `repository.clear()` to wipe tables between tests
+- **Clean on both ends of the suite:** call `cleanAllTables(dataSource)` in `beforeEach` *and* in `afterAll` before `destroy()` / `moduleRef.close()` / `app.close()`. `beforeEach` alone leaves the last test's rows in the shared database, where the next suite inherits them. That is not just noise: `migrations.integration-spec.ts` drops `channels` with CASCADE, so a leftover video becomes an orphan and the `videos.channel_id` foreign key can no longer be recreated — every later suite then fails inside `synchronize`, while each still passes in isolation
+- **Cleanup order:** always empty referencing tables before referenced ones (`refresh_tokens`, `verification_tokens`, `videos`, `channels`, `users`). `cleanAllTables` owns this order — extend that helper when adding a table instead of writing ad-hoc `DELETE`s
 
 ## E2E Tests (`*.e2e-spec.ts`)
 
