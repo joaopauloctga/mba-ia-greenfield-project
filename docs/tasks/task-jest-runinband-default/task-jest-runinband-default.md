@@ -1,7 +1,7 @@
 ---
 kind: task
 name: task-jest-runinband-default
-status: planned
+status: completed
 subproject: nestjs-project
 ---
 
