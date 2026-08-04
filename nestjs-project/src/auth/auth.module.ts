@@ -26,7 +26,12 @@ import { VerificationToken } from './entities/verification-token.entity';
       }),
     }),
     TypeOrmModule.forFeature([RefreshToken, VerificationToken]),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }]),
+    ThrottlerModule.forRootAsync({
+      inject: [authConfig.KEY],
+      useFactory: (cfg: ConfigType<typeof authConfig>) => [
+        { ttl: cfg.throttleTtlMs, limit: cfg.throttleLimit },
+      ],
+    }),
   ],
   controllers: [AuthController],
   providers: [

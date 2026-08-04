@@ -4,9 +4,11 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource, Repository } from 'typeorm';
+import type { ConfigType } from '@nestjs/config';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { AppModule } from '../src/app.module';
 import { AuthService } from '../src/auth/auth.service';
+import authConfig from '../src/config/auth.config';
 import { RefreshToken } from '../src/auth/entities/refresh-token.entity';
 import { VerificationToken } from '../src/auth/entities/verification-token.entity';
 import { DomainExceptionFilter } from '../src/common/filters/domain-exception.filter';
@@ -662,6 +664,7 @@ describe('Rate Limiting (e2e)', () => {
   let app: INestApplication<App>;
   let dataSource: DataSource;
   let throttlerStorage: ThrottlerStorageService;
+  let throttleLimit: number;
 
   beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
@@ -685,6 +688,9 @@ describe('Rate Limiting (e2e)', () => {
     dataSource = moduleFixture.get(DataSource);
     throttlerStorage =
       moduleFixture.get<ThrottlerStorageService>(ThrottlerStorage);
+    throttleLimit = moduleFixture.get<ConfigType<typeof authConfig>>(
+      authConfig.KEY,
+    ).throttleLimit;
   });
 
   afterAll(async () => {
@@ -696,8 +702,8 @@ describe('Rate Limiting (e2e)', () => {
     throttlerStorage.storage.clear();
   });
 
-  it('returns 429 on the 11th request to an auth endpoint within the ttl window', async () => {
-    for (let i = 0; i < 10; i++) {
+  it('returns 429 on the (limit + 1)th request to an auth endpoint within the ttl window', async () => {
+    for (let i = 0; i < throttleLimit; i++) {
       await request(app.getHttpServer())
         .post('/auth/forgot-password')
         .send({ email: 'throttle@example.com' })
