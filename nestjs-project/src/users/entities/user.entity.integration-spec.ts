@@ -6,9 +6,10 @@ import {
   createTestDataSource,
 } from '../../test/create-test-data-source';
 import { Channel } from '../../channels/entities/channel.entity';
+import { Video } from '../../videos/entities/video.entity';
 import { User } from './user.entity';
 
-const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken];
+const ALL_ENTITIES = [User, Channel, RefreshToken, VerificationToken, Video];
 
 describe('User entity (integration)', () => {
   let dataSource: DataSource;
@@ -21,6 +22,7 @@ describe('User entity (integration)', () => {
   });
 
   afterAll(async () => {
+    await cleanAllTables(dataSource);
     await dataSource.destroy();
   });
 

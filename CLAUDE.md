@@ -10,9 +10,9 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for auth, users, channels, videos, storage, queue and ffmpeg. Also hosts the video worker (`src/main.worker.ts` + `src/worker.module.ts`), which runs as its own container from the same codebase.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` (Next.js) — frontend app (Phases 01–02)
 
 ## Architecture (C4 Container Diagram)
 
@@ -23,8 +23,53 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (BullMQ on Redis) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Videos (Phase 03)
+
+Video upload, processing and delivery live in `nestjs-project/src/videos/`, backed by three supporting modules: `storage/` (S3/MinIO), `queue/` (BullMQ) and `ffmpeg/`.
+
+### Upload — bytes never pass through the API
+
+Uploads use **S3 multipart with presigned part URLs**. The API only issues signed URLs and records state; the client `PUT`s each part **directly to object storage**. This is what makes a 10GB upload possible without occupying the API.
+
+| Endpoint | Auth | Effect |
+|---|---|---|
+| `POST /videos/uploads` | required | Pre-registers the draft video (`awaiting_upload`) and opens the multipart session. Returns `videoId`, `slug`, `uploadId`, `partSize` (64 MiB) |
+| `GET /videos/uploads/:videoId/parts?from&to` | required | Issues presigned `UploadPart` URLs for a range of part numbers (1–10000) |
+| `POST /videos/uploads/:videoId/complete` | required | Validates the submitted parts against storage's own `ListParts`, completes the upload, moves the video to `processing` and enqueues the job |
+| `DELETE /videos/uploads/:videoId` | required | Aborts the session in storage and removes the draft row |
+| `GET /videos/:slug` | **public** | Returns metadata plus presigned streaming and download URLs; `409` until processing finishes |
+
+Ownership is enforced per request: the caller's channel must own the video, otherwise `403`.
+
+### Processing — the worker
+
+`POST .../complete` enqueues `video.process` on the `video-processing` queue (3 attempts, exponential backoff, `jobId = videoId`). The **`video-worker` container** consumes it (`VideoProcessor`, `src/videos/video.processor.ts`) and:
+
+1. presigns a GET URL for the source and runs **ffprobe** over it to extract duration
+2. runs **ffmpeg** to grab a thumbnail at 10% of the duration (minimum 1s)
+3. stores the JPEG and flips the row to `ready` with `duration_seconds` and `thumbnail_key`
+
+If every attempt fails, `OnWorkerEvent('failed')` sets the video to `failed` with `processing_error`. A repeatable `reconcile` job re-enqueues videos stuck in `processing` for more than 15 minutes.
+
+**FFmpeg is installed only in the worker image** (`Dockerfile.worker`) — not in `nestjs-api`.
+
+### Status lifecycle
+
+`awaiting_upload` → `processing` → `ready` | `failed` — persisted in `videos.processing_status` (Postgres enum). Table created by `1785111578614-CreateVideosTable.ts`; `Video` belongs to a `Channel` via `channel_id`.
+
+### Storage layout and delivery
+
+Single bucket (`S3_BUCKET`, default `streamtube`), keyed by video UUID:
+
+- `videos/{videoId}/source{ext}` — the uploaded file
+- `videos/{videoId}/thumbnail.jpg` — the generated thumbnail
+
+Each video gets a unique `slug` (base64url over 8 random bytes) used as its public URL identifier, with retry on collision. Playback and download are presigned GET URLs served straight from storage, which honors HTTP Range (`206 Partial Content`) — so playback never requires a full download. The download URL differs only by carrying `ResponseContentDisposition: attachment`.
+
+> **Known limitation:** presigned URLs are signed against `S3_ENDPOINT` (`http://minio:9000`), which only resolves **inside** the Compose network. A browser on the host cannot use them: the hostname does not resolve, and rewriting it to `localhost:9000` invalidates the SigV4 signature (`host` is a signed header). Serving these URLs to a real client requires presigning against a client-reachable endpoint.
 
 ## Docker Networking
 

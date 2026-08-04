@@ -6,6 +6,10 @@ const requiredEnv = {
   DB_NAME: 'db',
   JWT_SECRET: 'secret',
   JWT_REFRESH_SECRET: 'refresh-secret',
+  S3_BUCKET: 'streamtube',
+  S3_ACCESS_KEY_ID: 'access-key',
+  S3_SECRET_ACCESS_KEY: 'secret-key',
+  REDIS_HOST: 'redis',
 };
 
 const validate = (env: Record<string, string>) =>

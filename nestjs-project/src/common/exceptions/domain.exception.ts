@@ -48,3 +48,49 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video is not ready for delivery');
+  }
+}
+
+export class UploadSessionNotFoundException extends DomainException {
+  constructor() {
+    super('UPLOAD_SESSION_NOT_FOUND', 404, 'Upload session not found');
+  }
+}
+
+export class ForbiddenNotOwnerException extends DomainException {
+  constructor() {
+    super('FORBIDDEN_NOT_OWNER', 403, 'You do not own this upload session');
+  }
+}
+
+export class InvalidPartRangeException extends DomainException {
+  constructor() {
+    super('INVALID_PART_RANGE', 400, 'Invalid part range');
+  }
+}
+
+export class UploadAlreadyCompletedException extends DomainException {
+  constructor() {
+    super(
+      'UPLOAD_ALREADY_COMPLETED',
+      409,
+      'Upload session is no longer accepting parts',
+    );
+  }
+}
+
+export class PartListMismatchException extends DomainException {
+  constructor() {
+    super('PART_LIST_MISMATCH', 400, 'Submitted parts do not match storage');
+  }
+}
