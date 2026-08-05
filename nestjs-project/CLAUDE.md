@@ -70,10 +70,10 @@ npm run start:dev                        # Dev server with hot-reload
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
 
-npm test                                 # Unit tests
-npm run test:watch                       # Unit tests in watch mode
-npm run test:cov                         # Coverage report
-npm run test:e2e                         # End-to-end tests (always with --runInBand)
+npm test                                 # Unit + integration tests (serial — see "Test execution")
+npm run test:watch                       # Watch mode (parallel — see "Test execution")
+npm run test:cov                         # Coverage report (serial)
+npm run test:e2e                         # End-to-end tests (serial)
 
 npx tsc --noEmit                         # Type-check (required before declaring a task done)
 npm run lint                             # ESLint with auto-fix
@@ -97,14 +97,17 @@ docker compose exec redis redis-cli LLEN bull:video-processing:active
 
 ### Test execution
 
-Integration and e2e suites share a single test database. They **must** be run with `--runInBand`:
+Integration and e2e suites share a single test database, so they **must** run serially. Every script that runs them already carries `--runInBand` — do not pass the flag by hand:
 
 ```bash
-docker compose exec nestjs-api npm test -- --runInBand
-docker compose exec nestjs-api npm run test:e2e   # already configured
+docker compose exec nestjs-api npm test          # unit + integration
+docker compose exec nestjs-api npm run test:e2e  # end-to-end
+docker compose exec nestjs-api npm run test:cov  # coverage
 ```
 
-Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently.
+Parallel execution causes FK violations, deadlocks, and cross-suite contamination because suites truncate or seed shared tables concurrently: `cleanAllTables()` in `src/test/create-test-data-source.ts` runs `DELETE FROM` on the shared tables from every suite's `beforeEach`, so a suite running in a parallel worker wipes rows another one is still asserting on.
+
+`test:watch` is the one exception — it stays parallel because watch mode reruns a focused subset interactively and the worker pool keeps that loop fast. When a watch run touches more than one integration suite, run it serially: `npm run test:watch -- --runInBand`.
 
 During active development, run only the tests related to the file being changed (`npm test -- path/to/file.spec.ts`). Before declaring a task done, run the full suite — see the global `CLAUDE.md` → "Definition of Done (Technical)".
 
